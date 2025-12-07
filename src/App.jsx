@@ -18,7 +18,8 @@ import {
     doc, onSnapshot, query, orderBy, setDoc, getDoc, serverTimestamp 
 } from "firebase/firestore";
 
-// --- CONFIGURATION (REPLACE WITH YOUR KEYS) ---
+// --- CONFIGURATION ---
+// This is your actual Firebase project config
 const firebaseConfig = {
   apiKey: "AIzaSyCqowVnkUXzjgutGHRKKptEm5NjCl7C4yQ",
   authDomain: "studygenie-691e5.firebaseapp.com",
@@ -28,6 +29,7 @@ const firebaseConfig = {
   appId: "1:524154104312:web:bc5f8b1d46ce9ee6e8ce0d",
   measurementId: "G-BVLGXPV56E"
 };
+
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -108,67 +110,10 @@ const FormattedText = ({ text, className = "" }) => {
     );
 };
 
-// --- GEMINI AI SERVICE (HYBRID) ---
-// Tries Server (Gatekeeper) first, falls back to Client Key if running locally/server fails
+// --- GEMINI AI SERVICE (DIRECT CLIENT MODE) ---
+// Uses the user's provided API Key directly. No paywall.
 const generateContent = async (apiKey, prompt, context, systemInstruction, attachmentData = null, quantity = 1) => {
-    const user = auth.currentUser;
-    
-    // Helper to cleanup and parse response
-    const parseResponse = (text) => {
-        let cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
-        cleanText = cleanText.replace(/\\(?!["\\/bfnrtu])/g, "\\\\");
-        try {
-            return JSON.parse(cleanText);
-        } catch (e) {
-            // Recovery for truncated JSON
-            if (cleanText.trim().startsWith('[') && !cleanText.trim().endsWith(']')) {
-                const lastObjectEnd = cleanText.lastIndexOf('}');
-                if (lastObjectEnd !== -1) return JSON.parse(cleanText.substring(0, lastObjectEnd + 1) + ']');
-            }
-            if (cleanText.trim().startsWith('{') && !cleanText.trim().endsWith('}')) {
-                 const lastQuote = cleanText.lastIndexOf('"');
-                 if (lastQuote !== -1) return JSON.parse(cleanText.substring(0, lastQuote + 1) + '"}'); 
-            }
-            throw e;
-        }
-    };
-
-    // 1. ATTEMPT SERVER-SIDE (GATEKEEPER)
-    if (user) {
-        try {
-            // Note: We skip sending large images to serverless functions to avoid 4MB payload limits
-            // If attachment exists, we might want to skip directly to fallback unless we upload to storage first.
-            if (!attachmentData) {
-                const response = await fetch('/api/generate', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        prompt, context, systemInstruction, 
-                        userId: user.uid, isPro: false, quantity 
-                    })
-                });
-
-                if (response.status === 402) {
-                    const data = await response.json();
-                    throw new Error(`DAILY_LIMIT_REACHED`);
-                }
-
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.text) return parseResponse(data.text);
-                }
-                // If 404 or 500, throw to trigger catch block -> fallback
-                throw new Error("Server unreachable");
-            }
-        } catch (e) {
-            // If strictly limit reached, stop here.
-            if (e.message.includes("DAILY_LIMIT_REACHED")) throw e;
-            console.warn("Backend generation failed (likely running locally), switching to direct API call.", e);
-        }
-    }
-
-    // 2. FALLBACK: DIRECT CLIENT-SIDE CALL (For Localhost / Dev)
-    if (!apiKey) throw new Error("Backend unavailable and no API Key in settings. Please add your API Key.");
+    if (!apiKey) throw new Error("API Key is missing. Please add your own Google Gemini Key in Settings.");
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
     
@@ -190,6 +135,26 @@ const generateContent = async (apiKey, prompt, context, systemInstruction, attac
         contentsPart[0].text += "\n\n[DOCUMENT CONTEXT]: Analyze the attached image or PDF document carefully.";
     }
 
+    // Helper to cleanup and parse response
+    const parseResponse = (text) => {
+        let cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
+        cleanText = cleanText.replace(/\\(?!["\\/bfnrtu])/g, "\\\\");
+        try {
+            return JSON.parse(cleanText);
+        } catch (e) {
+            // Recovery for truncated JSON
+            if (cleanText.trim().startsWith('[') && !cleanText.trim().endsWith(']')) {
+                const lastObjectEnd = cleanText.lastIndexOf('}');
+                if (lastObjectEnd !== -1) return JSON.parse(cleanText.substring(0, lastObjectEnd + 1) + ']');
+            }
+            if (cleanText.trim().startsWith('{') && !cleanText.trim().endsWith('}')) {
+                 const lastQuote = cleanText.lastIndexOf('"');
+                 if (lastQuote !== -1) return JSON.parse(cleanText.substring(0, lastQuote + 1) + '"}'); 
+            }
+            throw e;
+        }
+    };
+
     for (let attempt = 0; attempt < 3; attempt++) {
         try {
             const response = await fetch(url, {
@@ -203,7 +168,7 @@ const generateContent = async (apiKey, prompt, context, systemInstruction, attac
 
             if (response.status === 429) {
                 // If local rate limit hit
-                throw new Error("Local Rate Limit Exceeded. Slow down.");
+                throw new Error("Quota Exceeded. Please wait a moment or check your Google Cloud billing.");
             }
 
             if (!response.ok) throw new Error(`Direct API Error: ${response.statusText}`);
@@ -408,11 +373,7 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, apiKey }) => {
             const result = await generateContent(apiKey, prompt, context, "", null, 1);
             onUpdateFolder({ ...folder, syllabus: syllabusText, coverage: result });
         } catch (error) { 
-            if (error.message.includes("DAILY_LIMIT_REACHED")) {
-                alert("You've hit your daily limit! 🚀\n\nUpgrade to StudyGenie Pro for unlimited access.");
-            } else {
-                alert(error.message); 
-            }
+            alert(error.message); 
         } finally { setIsAnalyzing(false); }
     };
 
@@ -548,9 +509,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
                     const batchResult = await generateContent(apiKey, prompt, combinedContext, systemInstruction, attachmentPayload, currentBatchCount);
                     accumulatedResults = [...accumulatedResults, ...batchResult];
                 } catch (batchError) { 
-                    if (batchError.message.includes("DAILY_LIMIT_REACHED")) {
-                        throw batchError; // Break loop and throw to main handler
-                    }
+                    alert(batchError.message);
                     console.error(batchError); break; 
                 }
             }
@@ -562,11 +521,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
             onUpdateDeck(updatedDeck);
 
         } catch (error) { 
-            if (error.message.includes("DAILY_LIMIT_REACHED")) {
-                alert("You've hit your daily limit! 🚀\n\nUpgrade to StudyGenie Pro for unlimited access.");
-            } else {
-                alert(error.message); 
-            }
+            alert(error.message); 
         } finally { setIsGenerating(false); setStatusMessage(""); }
     };
 
