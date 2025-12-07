@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
     BookOpen, Brain, ChevronLeft, ChevronRight, Settings, 
     Plus, Trash2, GraduationCap, FileText, Sparkles, 
@@ -207,8 +207,18 @@ const FlashcardStudy = ({ cards, onBack, apiKey }) => {
 
     const card = cards[idx];
 
-    const next = () => { setFlipped(false); setAiHelp(null); setIdx((prev) => (prev + 1) % cards.length); };
-    const prev = () => { setFlipped(false); setAiHelp(null); setIdx((prev) => (prev - 1 + cards.length) % cards.length); };
+    // Navigation functions using functional state updates to be stable dependencies
+    const next = useCallback(() => { 
+        setFlipped(false); 
+        setAiHelp(null); 
+        setIdx((prev) => (prev + 1) % cards.length); 
+    }, [cards.length]);
+
+    const prev = useCallback(() => { 
+        setFlipped(false); 
+        setAiHelp(null); 
+        setIdx((prev) => (prev - 1 + cards.length) % cards.length); 
+    }, [cards.length]);
 
     const getHelp = async (type) => {
         if (!apiKey) return alert("Need API Key");
@@ -227,6 +237,23 @@ const FlashcardStudy = ({ cards, onBack, apiKey }) => {
         }
     };
 
+    // Keyboard Shortcuts
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            if (e.code === 'Space') {
+                e.preventDefault(); // Prevent page scrolling
+                setFlipped(prev => !prev);
+            } else if (e.code === 'ArrowRight') {
+                next();
+            } else if (e.code === 'ArrowLeft') {
+                prev();
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [next, prev]);
+
     return (
         <div className="h-full flex flex-col p-6 max-w-4xl mx-auto w-full">
             <button onClick={onBack} className="self-start mb-4 flex items-center gap-2 text-slate-500 hover:text-indigo-600 transition font-medium">
@@ -236,10 +263,10 @@ const FlashcardStudy = ({ cards, onBack, apiKey }) => {
             <div className="flex-1 flex flex-col items-center justify-center relative perspective-1000">
                  {/* Controls */}
                 <div className="absolute top-1/2 -left-4 md:-left-16 transform -translate-y-1/2 z-10">
-                    <button onClick={prev} className="p-3 bg-white rounded-full shadow-lg hover:bg-slate-50 text-slate-600"><ChevronLeft/></button>
+                    <button onClick={prev} className="p-3 bg-white rounded-full shadow-lg hover:bg-slate-50 text-slate-600 hover:scale-110 transition" title="Previous (Left Arrow)"><ChevronLeft/></button>
                 </div>
                 <div className="absolute top-1/2 -right-4 md:-right-16 transform -translate-y-1/2 z-10">
-                    <button onClick={next} className="p-3 bg-white rounded-full shadow-lg hover:bg-slate-50 text-slate-600"><ChevronRight/></button>
+                    <button onClick={next} className="p-3 bg-white rounded-full shadow-lg hover:bg-slate-50 text-slate-600 hover:scale-110 transition" title="Next (Right Arrow)"><ChevronRight/></button>
                 </div>
 
                 {/* Card */}
@@ -256,7 +283,7 @@ const FlashcardStudy = ({ cards, onBack, apiKey }) => {
                         <div className="absolute w-full h-full bg-white rounded-2xl backface-hidden flex flex-col items-center justify-center p-8 border border-slate-200" style={{ backfaceVisibility: 'hidden' }}>
                             <span className="absolute top-6 left-6 text-xs font-bold tracking-wider text-slate-400 uppercase">Question</span>
                             <div className="text-2xl font-medium text-slate-800 text-center">{card.q}</div>
-                            <div className="absolute bottom-6 text-slate-400 text-sm animate-pulse">Click to Flip</div>
+                            <div className="absolute bottom-6 text-slate-400 text-sm animate-pulse">Click or Space to Flip</div>
                         </div>
                         {/* Back */}
                         <div className="absolute w-full h-full bg-indigo-600 rounded-2xl backface-hidden rotate-y-180 flex flex-col items-center justify-center p-8 text-white" style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}>
