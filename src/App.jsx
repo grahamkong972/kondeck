@@ -1217,6 +1217,154 @@ const FlashcardStudy = ({ cards, onBack, apiKey, onUpdateDeck, deck }) => {
     );
 };
 
+const QuizMode = ({ questions, onBack, deck }) => {
+    // Determine Mode
+    const isExam = deck?.quizMode === 'exam';
+
+    const [answers, setAnswers] = useState({});
+    const [submitted, setSubmitted] = useState(false);
+    const [timeLeft, setTimeLeft] = useState(questions.length * 90); // 1.5 mins per question
+
+    // Calculate Score
+    const score = Object.keys(answers).reduce((acc, key) => acc + (answers[key] === questions[key].a ? 1 : 0), 0);
+    const percentage = Math.round((score / questions.length) * 100);
+
+    // Timer Logic for Exam Mode
+    useEffect(() => {
+        if (isExam && !submitted && timeLeft > 0) {
+            const timer = setInterval(() => setTimeLeft(prev => prev - 1), 1000);
+            return () => clearInterval(timer);
+        } else if (timeLeft === 0 && !submitted) {
+            setSubmitted(true); // Auto-submit on time up
+        }
+    }, [isExam, submitted, timeLeft]);
+
+    // Format Time
+    const formatTime = (seconds) => {
+        const m = Math.floor(seconds / 60);
+        const s = seconds % 60;
+        return `${m}:${s < 10 ? '0' : ''}${s}`;
+    };
+
+    // Grade Calculation
+    const getGrade = (pct) => {
+        if (pct >= 85) return { grade: "HD", color: "text-emerald-600", text: "High Distinction" };
+        if (pct >= 75) return { grade: "D", color: "text-blue-600", text: "Distinction" };
+        if (pct >= 65) return { grade: "C", color: "text-indigo-600", text: "Credit" };
+        if (pct >= 50) return { grade: "P", color: "text-orange-600", text: "Pass" };
+        return { grade: "F", color: "text-red-600", text: "Fail" };
+    };
+
+    const grade = getGrade(percentage);
+
+    return (
+        <div className="max-w-3xl mx-auto p-6">
+            {/* Header */}
+            <div className="flex justify-between items-center mb-8 sticky top-0 bg-[#f8fafc] py-4 z-10 border-b">
+                <button onClick={onBack} className="flex gap-2 text-slate-500 hover:text-indigo-600 font-medium"><ChevronLeft/> Exit</button>
+                
+                {isExam && !submitted && (
+                    <div className={`font-mono font-bold text-xl flex items-center gap-2 ${timeLeft < 60 ? 'text-red-600 animate-pulse' : 'text-slate-700'}`}>
+                        <Clock size={20}/> {formatTime(timeLeft)}
+                    </div>
+                )}
+                
+                {submitted && (
+                    <div className="flex items-center gap-3">
+                         {isExam && <div className={`text-xl font-bold ${grade.color}`}>{grade.grade} ({percentage}%)</div>}
+                         {!isExam && <div className="bg-indigo-100 text-indigo-700 px-4 py-2 rounded-lg font-bold">Score: {score} / {questions.length}</div>}
+                    </div>
+                )}
+            </div>
+
+            {/* Results Screen for Exam Mode */}
+            {submitted && isExam && (
+                <div className="bg-white p-8 rounded-2xl shadow-lg border border-slate-200 text-center mb-8 animate-fade-in">
+                    <div className="inline-flex p-4 bg-slate-50 rounded-full mb-4">
+                        <Award size={48} className={grade.color} />
+                    </div>
+                    <h2 className="text-3xl font-bold text-slate-800 mb-2">{grade.text}</h2>
+                    <p className="text-slate-500 mb-6">You scored {score} out of {questions.length} ({percentage}%)</p>
+                    <div className="w-full bg-slate-100 h-3 rounded-full overflow-hidden">
+                        <div className={`h-full ${grade.color.replace('text-', 'bg-')}`} style={{ width: `${percentage}%` }}></div>
+                    </div>
+                </div>
+            )}
+
+            {/* Questions List */}
+            <div className="space-y-8 pb-12">
+                {questions.map((q, idx) => {
+                    const sel = answers[idx];
+                    const correct = q.a === idx;
+                    
+                    let status = "bg-white border-slate-200";
+                    if (submitted) {
+                        status = (sel === q.a) ? "bg-emerald-50 border-emerald-200" : (sel !== undefined ? "bg-red-50 border-red-200" : status);
+                    }
+                    
+                    return (
+                        <div key={idx} className={`p-6 rounded-xl border shadow-sm ${status}`}>
+                            <div className="font-medium text-lg mb-4 flex gap-3"><span className="text-slate-400 font-bold">{idx + 1}.</span><FormattedText text={q.q}/></div>
+                            <div className="space-y-2 pl-6">
+                                {q.options.map((opt, oIdx) => {
+                                    // Visual Logic for Options
+                                    let btnClass = `w-full text-left p-3 rounded-lg border transition flex gap-3 `;
+                                    
+                                    if (submitted) {
+                                        // In Exam Mode, show correct answers ONLY after submission
+                                        // In Practice Mode, highlight immediately
+                                        if (oIdx === q.a) btnClass += "bg-emerald-100 border-emerald-300 font-bold "; 
+                                        else if (sel === oIdx) btnClass += "bg-red-100 border-red-300 "; 
+                                        else btnClass += "opacity-60 ";
+                                    } else {
+                                        // Active State during selection
+                                        // In Practice Mode: Instant Feedback Logic
+                                        if (!isExam && sel !== undefined) {
+                                             if (oIdx === q.a) btnClass += "bg-emerald-100 border-emerald-300 font-bold ";
+                                             else if (sel === oIdx) btnClass += "bg-red-100 border-red-300 ";
+                                             else btnClass += "opacity-60 ";
+                                        } else {
+                                             btnClass += (sel === oIdx) ? "bg-indigo-50 border-indigo-400 ring-1 ring-indigo-400 " : "hover:bg-slate-50 ";
+                                        }
+                                    }
+
+                                    return (
+                                        <button key={oIdx} disabled={submitted && isExam} onClick={() => setAnswers({...answers, [idx]: oIdx})} className={btnClass}>
+                                            <div className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 ${sel === oIdx ? 'border-current' : 'border-slate-300'}`}>{sel === oIdx && <div className="w-2.5 h-2.5 rounded-full bg-current"></div>}</div>
+                                            <FormattedText text={opt}/>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            
+                            {/* Explanation logic:
+                                - Exam Mode: Show only after submit
+                                - Practice Mode: Show immediately if answer selected
+                            */}
+                            {(!isExam && sel !== undefined) || (isExam && submitted) ? (
+                                <div className="mt-4 ml-6 p-3 text-sm bg-white/50 rounded border text-slate-600 animate-fade-in">
+                                    <strong>Explanation:</strong> <FormattedText text={q.exp}/>
+                                </div>
+                            ) : null}
+                        </div>
+                    );
+                })}
+            </div>
+            
+            {(!submitted || !isExam) && (
+                <div className="sticky bottom-6 flex justify-center">
+                    <button 
+                        onClick={() => setSubmitted(true)} 
+                        className={`text-white font-bold py-3 px-8 rounded-full shadow-xl transition hover:-translate-y-1 ${isExam ? 'bg-red-600 hover:bg-red-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+                    >
+                        {isExam ? "Finish Exam" : "Submit Quiz"}
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+};
+
 export default function App() {
     const [folders, setFolders] = useState(() => JSON.parse(localStorage.getItem('studyGenieFolders')) || [{ id: 1, name: 'General' }]);
     const [decks, setDecks] = useState(() => {
