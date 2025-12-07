@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { 
     BookOpen, Brain, ChevronLeft, ChevronRight, Settings, 
     Plus, Trash2, GraduationCap, FileText, Sparkles, 
-    RotateCw, CheckCircle, XCircle 
+    RotateCw, CheckCircle, XCircle, Folder, ChevronDown 
 } from 'lucide-react';
 
 // --- GEMINI AI SERVICE ---
@@ -44,34 +44,95 @@ const generateContent = async (apiKey, prompt, context) => {
 // --- COMPONENTS ---
 
 // 1. Sidebar Navigation
-const Sidebar = ({ decks, activeDeckId, onSelect, onAdd, onDelete, onSettings }) => (
-    <div className="w-full md:w-64 bg-slate-900 text-white flex flex-col h-screen fixed md:relative z-20 shadow-xl">
-        <div className="p-6 border-b border-slate-700 flex items-center justify-between">
-            <h1 className="font-bold text-xl flex items-center gap-2">
-                <GraduationCap className="text-indigo-400" /> StudyGenie
-            </h1>
-            <button onClick={onSettings} className="hover:text-indigo-400 transition"><Settings size={18}/></button>
+const Sidebar = ({ folders, decks, activeDeckId, onSelectDeck, onAddFolder, onDeleteFolder, onAddDeck, onDeleteDeck, onSettings }) => {
+    const [expandedFolders, setExpandedFolders] = useState({});
+
+    // Toggle folder expansion
+    const toggleFolder = (folderId) => {
+        setExpandedFolders(prev => ({
+            ...prev,
+            [folderId]: !prev[folderId]
+        }));
+    };
+
+    // Auto-expand folders that contain the active deck or if they are new
+    useEffect(() => {
+        if (activeDeckId) {
+            const activeDeck = decks.find(d => d.id === activeDeckId);
+            if (activeDeck) {
+                setExpandedFolders(prev => ({ ...prev, [activeDeck.folderId]: true }));
+            }
+        }
+    }, [activeDeckId, decks]);
+
+    return (
+        <div className="w-full md:w-64 bg-slate-900 text-white flex flex-col h-screen fixed md:relative z-20 shadow-xl border-r border-slate-800">
+            <div className="p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
+                <h1 className="font-bold text-xl flex items-center gap-2">
+                    <GraduationCap className="text-indigo-400" /> StudyGenie
+                </h1>
+                <button onClick={onSettings} className="hover:text-indigo-400 transition"><Settings size={18}/></button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto custom-scroll p-4 space-y-6">
+                {folders.map(folder => (
+                    <div key={folder.id}>
+                        {/* Folder Header */}
+                        <div className="flex items-center justify-between group mb-2 select-none">
+                            <div 
+                                className="flex items-center gap-2 cursor-pointer hover:text-indigo-300 transition-colors flex-1" 
+                                onClick={() => toggleFolder(folder.id)}
+                            >
+                                {expandedFolders[folder.id] ? <ChevronDown size={16} className="text-slate-500"/> : <ChevronRight size={16} className="text-slate-500"/>}
+                                <Folder size={16} className="text-indigo-400 fill-indigo-400/20"/>
+                                <span className="font-semibold text-sm truncate">{folder.name}</span>
+                            </div>
+                            <button 
+                                onClick={(e) => { e.stopPropagation(); onDeleteFolder(folder.id); }} 
+                                className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-red-400 transition p-1"
+                                title="Delete Folder"
+                            >
+                                <Trash2 size={14}/>
+                            </button>
+                        </div>
+
+                        {/* Modules List */}
+                        {expandedFolders[folder.id] && (
+                            <div className="pl-6 space-y-1 border-l-2 border-slate-800 ml-2.5 transition-all">
+                                {decks.filter(d => d.folderId === folder.id).map(deck => (
+                                    <div key={deck.id} 
+                                         onClick={() => onSelectDeck(deck.id)}
+                                         className={`group flex items-center justify-between px-3 py-2 rounded-md cursor-pointer transition-all ${activeDeckId === deck.id ? 'bg-indigo-600/20 text-indigo-300 border border-indigo-500/30' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}>
+                                        <div className="truncate text-xs font-medium">{deck.title}</div>
+                                        <button 
+                                            onClick={(e) => { e.stopPropagation(); onDeleteDeck(deck.id); }} 
+                                            className={`opacity-0 group-hover:opacity-100 hover:text-red-400 transition ${activeDeckId === deck.id ? 'opacity-100' : ''}`}
+                                        >
+                                            <Trash2 size={12} />
+                                        </button>
+                                    </div>
+                                ))}
+                                
+                                <button 
+                                    onClick={() => onAddDeck(folder.id)} 
+                                    className="w-full text-left px-3 py-2 text-xs text-slate-500 hover:text-indigo-400 hover:bg-slate-800/50 rounded-md transition flex items-center gap-2 mt-1"
+                                >
+                                    <Plus size={12} /> New Module
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                ))}
+            </div>
+
+            <div className="p-4 border-t border-slate-800 shrink-0">
+                <button onClick={onAddFolder} className="w-full flex items-center justify-center gap-2 p-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-sm text-slate-300 hover:text-white transition font-medium border border-slate-700">
+                    <Plus size={16} /> New Folder
+                </button>
+            </div>
         </div>
-        
-        <div className="flex-1 overflow-y-auto custom-scroll p-4 space-y-2">
-            <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">My Modules</div>
-            {decks.map(deck => (
-                <div key={deck.id} 
-                     onClick={() => onSelect(deck.id)}
-                     className={`group flex items-center justify-between p-3 rounded-lg cursor-pointer transition-all ${activeDeckId === deck.id ? 'bg-indigo-600 shadow-md' : 'hover:bg-slate-800'}`}>
-                    <div className="truncate text-sm font-medium">{deck.title}</div>
-                    <button onClick={(e) => { e.stopPropagation(); onDelete(deck.id); }} 
-                            className={`opacity-0 group-hover:opacity-100 hover:text-red-400 transition ${activeDeckId === deck.id ? 'opacity-100' : ''}`}>
-                        <Trash2 size={14} />
-                    </button>
-                </div>
-            ))}
-            <button onClick={onAdd} className="w-full mt-4 flex items-center justify-center gap-2 p-3 border border-slate-700 rounded-lg hover:bg-slate-800 text-sm text-slate-400 hover:text-white transition">
-                <Plus size={16} /> New Module
-            </button>
-        </div>
-    </div>
-);
+    );
+};
 
 // 2. Input & Dashboard
 const Dashboard = ({ deck, onUpdateDeck, apiKey }) => {
@@ -410,77 +471,136 @@ const QuizMode = ({ questions, onBack }) => {
 
 // --- MAIN APP ---
 export default function App() {
-    // Load state from localStorage or defaults
-    const [decks, setDecks] = useState(() => {
-        const saved = localStorage.getItem('studyGenieData');
-        return saved ? JSON.parse(saved) : [{ id: 1, title: 'BABS2204 Example', content: '', cards: [], quiz: [], mode: 'dashboard' }];
+    // --- STATE INITIALIZATION WITH MIGRATION ---
+    const [folders, setFolders] = useState(() => {
+        const savedFolders = localStorage.getItem('studyGenieFolders');
+        if (savedFolders) return JSON.parse(savedFolders);
+        // Default folder if starting fresh
+        return [{ id: 1, name: 'General' }];
     });
-    const [activeDeckId, setActiveDeckId] = useState(decks[0].id);
+
+    const [decks, setDecks] = useState(() => {
+        const savedDecks = localStorage.getItem('studyGenieData');
+        let initialDecks = savedDecks ? JSON.parse(savedDecks) : [{ id: 101, folderId: 1, title: 'Example Module', content: '', cards: [], quiz: [], mode: 'dashboard' }];
+        
+        // MIGRATION: Ensure all decks have a folderId
+        const migratedDecks = initialDecks.map(deck => {
+            if (!deck.folderId) return { ...deck, folderId: 1 }; // Assign to default 'General' folder (ID 1)
+            return deck;
+        });
+        
+        return migratedDecks;
+    });
+
+    const [activeDeckId, setActiveDeckId] = useState(decks[0]?.id || null);
     const [apiKey, setApiKey] = useState(() => localStorage.getItem('geminiKey') || '');
     const [showSettings, setShowSettings] = useState(false);
 
+    // Persist Data
     useEffect(() => {
+        localStorage.setItem('studyGenieFolders', JSON.stringify(folders));
         localStorage.setItem('studyGenieData', JSON.stringify(decks));
-    }, [decks]);
-
-    useEffect(() => {
         localStorage.setItem('geminiKey', apiKey);
-    }, [apiKey]);
+    }, [folders, decks, apiKey]);
 
+    // Derived State
     const activeDeck = decks.find(d => d.id === activeDeckId) || decks[0];
 
+    // --- ACTIONS ---
+
+    // Update the active deck content/mode/etc
     const updateDeck = (updatedDeck) => {
         setDecks(decks.map(d => d.id === updatedDeck.id ? updatedDeck : d));
     };
 
-    const addDeck = () => {
+    // Add a new folder
+    const addFolder = () => {
+        const name = prompt("Enter folder name:");
+        if (name) {
+            setFolders([...folders, { id: Date.now(), name }]);
+        }
+    };
+
+    // Delete a folder (and its decks, optionally - currently just deletes folder and decks inside)
+    const deleteFolder = (folderId) => {
+        if (confirm("Delete this folder and all its modules?")) {
+            setDecks(decks.filter(d => d.folderId !== folderId));
+            setFolders(folders.filter(f => f.id !== folderId));
+            if (activeDeck?.folderId === folderId) setActiveDeckId(null);
+        }
+    };
+
+    // Add a new deck (module) to a specific folder
+    const addDeck = (folderId) => {
         const newId = Date.now();
-        setDecks([...decks, { id: newId, title: 'New Module', content: '', cards: [], quiz: [], mode: 'dashboard' }]);
+        const newDeck = { 
+            id: newId, 
+            folderId: folderId, 
+            title: 'New Module', 
+            content: '', 
+            cards: [], 
+            quiz: [], 
+            mode: 'dashboard' 
+        };
+        setDecks([...decks, newDeck]);
         setActiveDeckId(newId);
     };
 
+    // Delete a deck
     const deleteDeck = (id) => {
-        if(confirm("Are you sure?")) {
+        if(confirm("Are you sure you want to delete this module?")) {
             const newDecks = decks.filter(d => d.id !== id);
-            setDecks(newDecks.length ? newDecks : [{ id: 1, title: 'New Module', content: '', cards: [], quiz: [], mode: 'dashboard' }]);
-            setActiveDeckId(newDecks.length ? newDecks[0].id : 1);
+            setDecks(newDecks);
+            if (activeDeckId === id) setActiveDeckId(newDecks[0]?.id || null);
         }
     };
 
     return (
-        <div className="flex h-screen bg-[#f8fafc] font-sans">
+        <div className="flex h-screen bg-[#f8fafc] font-sans text-slate-900">
             {/* KaTeX CSS Injection */}
             <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
             
             <Sidebar 
-                decks={decks} 
-                activeDeckId={activeDeckId} 
-                onSelect={(id) => {
-                    // Reset mode to dashboard when switching
-                    updateDeck({...activeDeck, mode: 'dashboard'});
+                folders={folders}
+                decks={decks}
+                activeDeckId={activeDeckId}
+                onSelectDeck={(id) => {
+                    const d = decks.find(deck => deck.id === id);
+                    if(d) updateDeck({...d, mode: 'dashboard'});
                     setActiveDeckId(id);
                 }}
-                onAdd={addDeck}
-                onDelete={deleteDeck}
+                onAddFolder={addFolder}
+                onDeleteFolder={deleteFolder}
+                onAddDeck={addDeck}
+                onDeleteDeck={deleteDeck}
                 onSettings={() => setShowSettings(true)}
             />
             
-            <main className="flex-1 overflow-y-auto custom-scroll relative">
-                {activeDeck.mode === 'dashboard' && (
-                    <Dashboard deck={activeDeck} onUpdateDeck={updateDeck} apiKey={apiKey} />
-                )}
-                {activeDeck.mode === 'flashcards' && (
-                    <FlashcardStudy 
-                        cards={activeDeck.cards} 
-                        onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})}
-                        apiKey={apiKey}
-                    />
-                )}
-                {activeDeck.mode === 'quiz' && (
-                    <QuizMode 
-                        questions={activeDeck.quiz} 
-                        onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} 
-                    />
+            <main className="flex-1 overflow-y-auto custom-scroll relative bg-[#f8fafc]">
+                {activeDeck ? (
+                    <>
+                        {activeDeck.mode === 'dashboard' && (
+                            <Dashboard deck={activeDeck} onUpdateDeck={updateDeck} apiKey={apiKey} />
+                        )}
+                        {activeDeck.mode === 'flashcards' && (
+                            <FlashcardStudy 
+                                cards={activeDeck.cards} 
+                                onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})}
+                                apiKey={apiKey}
+                            />
+                        )}
+                        {activeDeck.mode === 'quiz' && (
+                            <QuizMode 
+                                questions={activeDeck.quiz} 
+                                onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} 
+                            />
+                        )}
+                    </>
+                ) : (
+                    <div className="flex flex-col items-center justify-center h-full text-slate-400">
+                        <BookOpen size={48} className="mb-4 opacity-50"/>
+                        <p className="text-lg font-medium">Select or create a module to start studying.</p>
+                    </div>
                 )}
             </main>
 
