@@ -68,16 +68,17 @@ const FormattedText = ({ text, className = "" }) => {
         if (typeof str !== 'string') return str;
         
         let processed = str
-            // 1. Aggressive Newline Fixes (Literal \n, \\n, and real newlines)
-            .replace(/\\\\n/g, '<br/>') // Double escaped
-            .replace(/\\n/g, '<br/>')   // Single escaped
-            .replace(/\n/g, '<br/>')    // Real newline
-            .replace(/\\newline/g, '<br/>') // LaTeX newline
+            // 1. Aggressive Newline Fixes
+            .replace(/ewline/g, '<br/>') // Fix specific artifact "ewline"
+            .replace(/\\newline/g, '<br/>') 
+            .replace(/\\\\n/g, '<br/>') 
+            .replace(/\\n/g, '<br/>')   
+            .replace(/\n/g, '<br/>')    
             
             // 2. LaTeX Bolding Fixes (\textbf{...} -> <strong>...</strong>)
             .replace(/\\textbf\{([^\}]+)\}/g, '<strong>$1</strong>')
             
-            // 3. LaTeX Text command Fixes (removing \text{...} wrapper)
+            // 3. LaTeX Text command Fixes
             .replace(/\\text\{([^\}]+)\}/g, '$1')
             
             // 4. Markdown Bolding (**...** -> <strong>...</strong>)
@@ -113,8 +114,9 @@ const generateContent = async (apiKey, prompt, context, systemInstruction, attac
         1. Return ONLY valid JSON.
         2. Do NOT use markdown code blocks (no \`\`\`json).
         3. Double-escape all backslashes in LaTeX (e.g. \\\\alpha).
-        4. Use MARKDOWN for text formatting (e.g. **bold**) instead of LaTeX commands like \\textbf.
-        5. Use LaTeX ($...$) ONLY for mathematical formulas.
+        4. Use HTML <br/> for line breaks. Do NOT use \\newline or \\n.
+        5. Use MARKDOWN for text formatting (e.g. **bold**) instead of LaTeX commands like \\textbf.
+        6. Use LaTeX ($...$) ONLY for mathematical formulas.
     `;
 
     const contentsPart = [{ text: `CONTEXT:\n${context}\n\nTASK:\n${prompt}` }];
