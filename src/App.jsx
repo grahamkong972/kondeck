@@ -43,17 +43,35 @@ const generateContent = async (apiKey, prompt, context) => {
     // Cleanup JSON: Remove markdown blocks
     let cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
 
-    // ERROR FIX: Robust Backslash Handling
-    // This regex finds backslashes that are NOT followed by valid JSON escape chars (", \, /, b, f, n, r, t, u)
-    // and double-escapes them. This fixes "Bad escaped character" errors from LaTeX like \alpha.
+    // ERROR FIX 1: Robust Backslash Handling
     cleanText = cleanText.replace(/\\(?!["\\/bfnrtu])/g, "\\\\");
 
     try {
         return JSON.parse(cleanText);
     } catch (e) {
+        // ERROR FIX 2: RECOVERY MECHANISM FOR TRUNCATED JSON
+        // This handles cases where the AI hits a token limit and cuts off the response.
+        try {
+            // If it looks like an array start but has no end...
+            if (cleanText.trim().startsWith('[') && !cleanText.trim().endsWith(']')) {
+                console.warn("JSON was truncated. Attempting to repair...");
+                
+                // Find the last closing brace '}' which signifies the end of the last complete object
+                const lastObjectEnd = cleanText.lastIndexOf('}');
+                
+                if (lastObjectEnd !== -1) {
+                    // Cut off the garbage after the last '}' and manually close the array
+                    const fixedText = cleanText.substring(0, lastObjectEnd + 1) + ']';
+                    return JSON.parse(fixedText);
+                }
+            }
+        } catch (recoveryError) {
+            console.error("JSON Recovery Failed:", recoveryError);
+        }
+
         console.error("JSON Parsing Failed:", e);
         console.log("Raw Text:", text); 
-        throw new Error("Failed to parse AI response. The content might contain complex formatting that broke the JSON.");
+        throw new Error("The AI response was too long or malformed. Try generating fewer questions (e.g., 10-15) at a time.");
     }
 };
 
@@ -154,7 +172,7 @@ const Sidebar = ({ folders, decks, activeDeckId, onSelectDeck, onAddFolder, onDe
 const Dashboard = ({ deck, onUpdateDeck, apiKey }) => {
     const [isGenerating, setIsGenerating] = useState(false);
     const [genType, setGenType] = useState("flashcards");
-    const [count, setCount] = useState(5);
+    const [count, setCount] = useState(10); // Changed default to 10
     const [activeTab, setActiveTab] = useState('notes');
     
     // State for the three input types, initializing from deck or falling back to 'content'
@@ -284,7 +302,7 @@ const Dashboard = ({ deck, onUpdateDeck, apiKey }) => {
                             </div>
                             <div className="flex items-center gap-2">
                                 <span className="font-medium">Count:</span>
-                                <input type="number" min="1" max="20" value={count} onChange={(e) => setCount(e.target.value)} className="w-16 bg-white rounded-md px-3 py-1.5 border border-slate-300 focus:border-indigo-500 focus:outline-none"/>
+                                <input type="number" min="1" max="50" value={count} onChange={(e) => setCount(e.target.value)} className="w-16 bg-white rounded-md px-3 py-1.5 border border-slate-300 focus:border-indigo-500 focus:outline-none"/>
                             </div>
                         </div>
                         <button 
