@@ -136,12 +136,7 @@ const generateContent = async (apiKey, prompt, context, systemInstruction, attac
     // Helper to cleanup and parse response
     const parseResponse = (text) => {
         let cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
-        
-        // NUCLEAR FIX for "Bad escaped character"
-        // This regex finds any backslash that is NOT followed by a valid JSON escape char (", \, /, b, f, n, r, t, u)
-        // It replaces it with a double backslash. This fixes LaTeX like \alpha -> \\alpha without breaking \n -> \\n
         cleanText = cleanText.replace(/\\(?!["\\/bfnrtu])/g, "\\\\");
-
         try {
             return JSON.parse(cleanText);
         } catch (e) {
@@ -510,7 +505,12 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
 
                 try {
                     const batchResult = await generateContent(apiKey, prompt, combinedContext, systemInstruction, attachmentPayload, currentBatchCount);
-                    accumulatedResults = [...accumulatedResults, ...batchResult];
+                    
+                    // FIX: Ensure result is an array before spreading
+                    // If AI returns a single object or null, wrap it in array
+                    const safeResult = Array.isArray(batchResult) ? batchResult : (batchResult ? [batchResult] : []);
+                    
+                    accumulatedResults = [...accumulatedResults, ...safeResult];
                 } catch (batchError) { 
                     alert(batchError.message);
                     console.error(batchError); break; 
