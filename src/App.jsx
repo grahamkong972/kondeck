@@ -5,7 +5,7 @@ import {
     RotateCw, CheckCircle, XCircle, Folder, ChevronDown,
     Mic, Presentation, BookOpenText, PieChart, AlertCircle,
     LayoutDashboard, Image as ImageIcon, X, FileType, LogOut, Lock, Mail, Edit3, Edit2,
-    Clock, Layers, Zap, Tag, Hash, Timer, Award, FileQuestion, PenTool, CheckSquare, Sliders, Play
+    Clock, Layers, Zap, Tag, Hash, Timer, Award, FileQuestion, PenTool, CheckSquare, Sliders, Check
 } from 'lucide-react';
 
 // --- FIREBASE IMPORTS ---
@@ -20,10 +20,8 @@ import {
 } from "firebase/firestore";
 
 // --- CONFIGURATION ---
-// SECURITY NOTE: Replace these with your actual keys or environment variables.
-// Do not commit hardcoded keys to GitHub.
 const firebaseConfig = {
-  apiKey: "YOUR_FIREBASE_API_KEY", 
+  apiKey: "AIzaSyCqowVnkUXzjgutGHRKKptEm5NjCl7C4yQ",
   authDomain: "studygenie-691e5.firebaseapp.com",
   projectId: "studygenie-691e5",
   storageBucket: "studygenie-691e5.firebasestorage.app",
@@ -33,15 +31,9 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase
-// Wrap in try-catch to prevent crash if config is missing during dev
-let app, auth, db;
-try {
-    app = initializeApp(firebaseConfig);
-    auth = getAuth(app);
-    db = getFirestore(app);
-} catch (e) {
-    console.error("Firebase initialization failed. Check your config.", e);
-}
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
 
 // --- UTILS ---
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -79,7 +71,6 @@ const validateAndFixData = (data, type) => {
     if (!Array.isArray(data)) return [];
     
     return data.map(item => {
-        // Fix Flashcards
         if (type === 'flashcards') {
             return {
                 q: String(item.q || "Error: Question missing"),
@@ -87,27 +78,25 @@ const validateAndFixData = (data, type) => {
                 nextReview: item.nextReview || null 
             };
         }
-        // Fix MCQs (Quiz or Exam)
         if (type === 'mcq' || type === 'exam') {
             let options = item.options;
             if (!options || !Array.isArray(options)) options = ["True", "False"]; 
             options = options.map(opt => String(opt));
             
             return {
-                type: 'mcq', // Tag as MCQ for ExamRunner
+                type: 'mcq',
                 q: String(item.q || "Error: Question missing"),
                 options: options,
                 a: (typeof item.a === 'number' && item.a < options.length) ? item.a : 0, 
                 exp: String(item.exp || "No explanation provided.")
             };
         }
-        // Fix SAQs
         if (type === 'saq') {
             return {
-                type: 'saq', // Tag as SAQ for ExamRunner
+                type: 'saq', 
                 q: String(item.q || "Error: Question missing"),
                 model: String(item.model || "No model answer provided."),
-                marks: typeof item.marks === 'number' ? item.marks : 5 
+                marks: typeof item.marks === 'number' ? item.marks : 5
             };
         }
         return item;
@@ -178,13 +167,14 @@ const FormattedText = ({ text, className = "" }) => {
     if (text === null || text === undefined) return null;
 
     const processText = (str) => {
+        if (typeof str === 'object') return JSON.stringify(str);
         if (typeof str !== 'string') return String(str);
         return str
             .replace(/ewline/g, '<br/>') 
             .replace(/\\newline/g, '<br/>') 
             .replace(/\\\\n/g, '<br/>') 
-            .replace(/\\n/g, '<br/>')    
-            .replace(/\n/g, '<br/>')      
+            .replace(/\\n/g, '<br/>')   
+            .replace(/\n/g, '<br/>')    
             .replace(/\\textbf\{([^\}]+)\}/g, '<strong>$1</strong>')
             .replace(/\\text\{([^\}]+)\}/g, '$1')
             .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
@@ -372,7 +362,7 @@ const ExamSetupModal = ({ modules, onClose, onStartExam }) => {
                     </div>
                     <div>
                         <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Include Modules</label>
-                        <div className="max-h-40 overflow-y-auto border rounded-lg custom-scroll">
+                        <div className="max-h-40 overflow-y-auto border rounded-lg">
                             {modules.map(m => (
                                 <div key={m.id} onClick={() => toggleModule(m.id)} className={`flex items-center justify-between p-3 border-b last:border-b-0 cursor-pointer hover:bg-slate-50 ${selectedModuleIds.includes(m.id) ? 'bg-indigo-50' : ''}`}>
                                     <span className="text-sm font-medium text-slate-700 truncate pr-2">{m.title}</span>
@@ -391,12 +381,12 @@ const ExamSetupModal = ({ modules, onClose, onStartExam }) => {
     );
 };
 
-// --- EXAM RUNNER (Unified Quiz + SAQ) ---
+// --- EXAM RUNNER ---
 const ExamRunner = ({ questions, timeLimit, onBack, apiKey }) => {
     const [answers, setAnswers] = useState({});
     const [saqFeedback, setSaqFeedback] = useState({});
     const [submitted, setSubmitted] = useState(false);
-    const [timeLeft, setTimeLeft] = useState(timeLimit ? timeLimit * 60 : 600); // Default fallback
+    const [timeLeft, setTimeLeft] = useState(timeLimit ? timeLimit * 60 : 600); 
     const [gradingLoading, setGradingLoading] = useState({});
 
     useEffect(() => {
@@ -535,7 +525,7 @@ const ExamRunner = ({ questions, timeLimit, onBack, apiKey }) => {
     );
 };
 
-// --- SAQ MODE (Short Answer Practice) ---
+// --- SAQ MODE ---
 const SAQMode = ({ questions, onBack, apiKey }) => {
     const [idx, setIdx] = useState(0);
     const [userAnswer, setUserAnswer] = useState("");
@@ -613,6 +603,9 @@ const SAQMode = ({ questions, onBack, apiKey }) => {
     );
 };
 
+// ... Sidebar, AuthPage, ManageModal, NameModal ...
+// (These are layout components, standard implementation as before)
+
 const Sidebar = ({ folders, decks, activeId, viewMode, onSelectDeck, onSelectFolder, onAddFolder, onDeleteFolder, onRenameFolder, onAddDeck, onDeleteDeck, onSettings }) => {
     const [expandedFolders, setExpandedFolders] = useState({});
     const toggleFolder = (folderId) => setExpandedFolders(prev => ({ ...prev, [folderId]: !prev[folderId] }));
@@ -665,7 +658,221 @@ const Sidebar = ({ folders, decks, activeId, viewMode, onSelectDeck, onSelectFol
             </div>
             <div className="p-4 border-t border-slate-800 shrink-0">
                 <button onClick={onAddFolder} className="w-full flex items-center justify-center gap-2 p-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-sm text-slate-300 hover:text-white transition font-medium border border-slate-700"><Plus size={16} /> New Folder</button>
+                <button onClick={() => signOut(auth)} className="w-full flex items-center justify-center gap-2 p-2.5 hover:bg-red-900/30 text-slate-400 hover:text-red-400 rounded-lg text-sm transition"><LogOut size={16}/> Sign Out</button>
             </div>
+        </div>
+    );
+};
+
+const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }) => {
+    const [isAnalyzing, setIsAnalyzing] = useState(false);
+    const [syllabusText, setSyllabusText] = useState(folder.syllabus || "");
+    const [isGlobalStudy, setIsGlobalStudy] = useState(false);
+    const [globalStudyMode, setGlobalStudyMode] = useState('srs');
+    const [globalShuffle, setGlobalShuffle] = useState(false);
+    
+    // NEW: Exam Setup State
+    const [showExamSetup, setShowExamSetup] = useState(false);
+    const [activeExamData, setActiveExamData] = useState(null); // For global exam
+    const [examTimeLimit, setExamTimeLimit] = useState(0); // Add state for time limit
+
+    useEffect(() => { setSyllabusText(folder.syllabus || ""); }, [folder.id]);
+    const handleSaveSyllabus = () => onUpdateFolder({ ...folder, syllabus: syllabusText }); 
+
+    const handleAnalyze = async () => {
+        if (!syllabusText.trim()) return alert("Please paste the Course Outline first.");
+        
+        setIsAnalyzing(true);
+        try {
+            const allContent = decks.map(d => `MODULE: ${d.title}\nNOTES: ${d.notes || ''}\nSLIDES: ${d.slides || ''}\nTRANSCRIPT: ${d.transcript || ''}`).join("\n\n----------------\n\n");
+            if (!allContent.trim()) return alert("No content found in modules!");
+
+            const prompt = `Analyze 'STUDENT MATERIALS' against 'OFFICIAL SYLLABUS'. Return JSON: {"score": 0-100, "analysis": "summary", "missing": "missing topics"}`;
+            const context = `OFFICIAL SYLLABUS:\n${syllabusText}\n\nSTUDENT MATERIALS:\n${allContent}`;
+
+            const result = await generateContent(apiKey, prompt, context, "", null, 1);
+            onUpdateFolder({ ...folder, syllabus: syllabusText, coverage: result });
+        } catch (error) { 
+            alert(error.message); 
+        } finally { setIsAnalyzing(false); }
+    };
+
+    // Prepare global deck
+    const globalCards = decks.flatMap(d => (d.cards || []).map(c => ({...c, _deckId: d.id})));
+
+    const handleGlobalUpdate = (updatedGlobalDeck) => {
+        const cardsByDeck = {};
+        updatedGlobalDeck.cards.forEach(c => {
+            if (c._deckId) {
+                if (!cardsByDeck[c._deckId]) cardsByDeck[c._deckId] = [];
+                cardsByDeck[c._deckId].push(c);
+            }
+        });
+
+        Object.keys(cardsByDeck).forEach(deckId => {
+            const originalDeck = decks.find(d => d.id === deckId);
+            if (originalDeck) {
+                onUpdateDeck({ ...originalDeck, cards: cardsByDeck[deckId] });
+            }
+        });
+    };
+
+    // HANDLER FOR STARTING MOCK EXAM
+    const handleStartMockExam = ({ moduleIds, numMCQs, numSAQs, timeLimit }) => {
+        // Pool questions
+        const selectedDecks = decks.filter(d => moduleIds.includes(d.id));
+        
+        // 1. Get MCQs (prioritize 'exams' list, fall back to 'quiz')
+        const allMCQs = selectedDecks.flatMap(d => [...(d.exams || []), ...(d.quiz || [])].map(q => ({...q, type: 'mcq'})));
+        
+        // 2. Get SAQs
+        const allSAQs = selectedDecks.flatMap(d => (d.saqs || []).map(q => ({...q, type: 'saq'})));
+
+        // 3. Shuffle and Slice
+        const shuffledMCQs = allMCQs.sort(() => 0.5 - Math.random()).slice(0, numMCQs);
+        const shuffledSAQs = allSAQs.sort(() => 0.5 - Math.random()).slice(0, numSAQs);
+
+        // 4. Combine (MCQs first, then SAQs is standard exam format)
+        const finalExam = [...shuffledMCQs, ...shuffledSAQs];
+
+        if (finalExam.length === 0) return alert("Not enough questions generated in selected modules.");
+
+        setExamTimeLimit(timeLimit); // Store time limit
+        setActiveExamData(finalExam);
+        setShowExamSetup(false);
+    };
+
+    if (isGlobalStudy) {
+        let finalCards = globalCards;
+        if (globalShuffle) {
+            finalCards = [...globalCards].sort(() => Math.random() - 0.5);
+        }
+
+        const virtualDeck = { 
+            id: 'global', 
+            title: `${folder.name} (Global)`, 
+            studyMode: globalStudyMode,
+            cards: finalCards 
+        };
+        return <FlashcardStudy 
+            cards={finalCards} 
+            deck={virtualDeck} 
+            apiKey={apiKey} 
+            onUpdateDeck={handleGlobalUpdate}
+            onBack={() => setIsGlobalStudy(false)} 
+        />;
+    }
+
+    // Render Active Global Exam
+    if (activeExamData) {
+         return <ExamRunner questions={activeExamData} timeLimit={examTimeLimit} onBack={() => setActiveExamData(null)} apiKey={apiKey} />;
+    }
+
+    const totalCards = decks.reduce((sum, d) => sum + (d.cards?.length || 0), 0);
+    const totalQuestions = decks.reduce((sum, d) => sum + (d.quiz?.length || 0), 0);
+    const totalExamQs = decks.reduce((sum, d) => sum + (d.exams?.length || 0), 0);
+    const totalSaqs = decks.reduce((sum, d) => sum + (d.saqs?.length || 0), 0); // New stat
+
+    return (
+        <div className="max-w-6xl mx-auto p-6 h-full flex flex-col">
+            <div className="mb-8">
+                <h2 className="text-3xl font-bold text-slate-800 flex items-center gap-3"><Folder size={32} className="text-indigo-500"/> {folder.name} <span className="text-slate-400 text-lg font-normal">/ Course Overview</span></h2>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 flex-1 min-h-0">
+                <div className="lg:col-span-8 flex flex-col gap-4 h-full">
+                     {/* Syllabus Analysis Panel */}
+                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex-1 flex flex-col">
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="font-bold text-slate-700 flex items-center gap-2"><BookOpenText size={20} className="text-emerald-500"/> Course Syllabus</h3>
+                            <button onClick={handleSaveSyllabus} className="text-xs text-indigo-600 font-medium hover:underline">Save Text</button>
+                        </div>
+                        <textarea className="flex-1 w-full p-4 bg-slate-50 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-sm font-mono leading-relaxed" placeholder="Paste course outline here..." value={syllabusText} onChange={(e) => setSyllabusText(e.target.value)} onBlur={handleSaveSyllabus}></textarea>
+                        <div className="mt-4">
+                            <button onClick={handleAnalyze} disabled={isAnalyzing} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70">
+                                {isAnalyzing ? <RotateCw className="animate-spin"/> : <PieChart/>} {isAnalyzing ? "Auditing..." : "Analyze Coverage"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div className="lg:col-span-4 space-y-6 overflow-y-auto">
+                    {/* Content Audit Panel ... */}
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                        <h3 className="font-semibold text-slate-700 mb-4 flex items-center gap-2"><CheckCircle size={18} className="text-indigo-500"/> Content Audit</h3>
+                        {folder.coverage ? (
+                            <div className="space-y-4 animate-fade-in">
+                                <div className="flex items-end gap-2">
+                                    <span className={`text-4xl font-bold ${folder.coverage.score >= 80 ? 'text-emerald-600' : folder.coverage.score >= 50 ? 'text-yellow-600' : 'text-red-600'}`}>{folder.coverage.score}%</span>
+                                    <span className="text-sm text-slate-500 mb-1">Coverage Score</span>
+                                </div>
+                                <div className="w-full bg-slate-100 rounded-full h-2"><div className="bg-emerald-500 h-2 rounded-full transition-all duration-1000" style={{ width: `${folder.coverage.score}%` }}></div></div>
+                                <div className="p-3 bg-slate-50 rounded-lg text-sm text-slate-700 border border-slate-100"><FormattedText text={folder.coverage.analysis}/></div>
+                                {folder.coverage.missing && <div className="p-3 bg-red-50 rounded-lg text-sm text-red-700 border border-red-100"><div className="font-bold flex items-center gap-2 mb-1"><AlertCircle size={14}/> Missing:</div><FormattedText text={folder.coverage.missing}/></div>}
+                            </div>
+                        ) : <div className="text-center text-slate-400 py-8 text-sm">Run analysis to check coverage.</div>}
+                    </div>
+                    
+                    {/* Course Totals Updated */}
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                        <h3 className="font-semibold text-slate-700 mb-4">Course Totals</h3>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="bg-slate-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-slate-800">{decks.length}</div><div className="text-xs text-slate-500 uppercase">Modules</div></div>
+                            <div className="bg-indigo-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-indigo-600">{totalCards}</div><div className="text-xs text-indigo-400 uppercase">Cards</div></div>
+                            <div className="bg-emerald-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-emerald-600">{totalQuestions}</div><div className="text-xs text-emerald-400 uppercase">Practice</div></div>
+                            <div className="bg-purple-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-purple-600">{totalSaqs}</div><div className="text-xs text-purple-400 uppercase">SAQs</div></div>
+                             <div className="bg-red-50 p-4 rounded-lg text-center col-span-2"><div className="text-2xl font-bold text-red-600">{totalExamQs}</div><div className="text-xs text-red-400 uppercase">Exam Qs</div></div>
+                        </div>
+                    </div>
+                    
+                    {/* GLOBAL BUTTONS */}
+                    <div className="space-y-3">
+                        <div className="bg-gradient-to-br from-indigo-600 to-violet-600 p-6 rounded-xl shadow-md text-white">
+                            <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><Layers/> Global Flashcards</h3>
+                            
+                            <div className="flex items-center gap-3 mb-4 bg-white/10 p-1 rounded-lg">
+                                <button 
+                                    onClick={() => setGlobalStudyMode('standard')}
+                                    className={`flex-1 py-1.5 px-3 rounded-md text-sm font-bold transition ${globalStudyMode === 'standard' ? 'bg-white text-indigo-600 shadow' : 'text-indigo-100 hover:bg-white/10'}`}
+                                >
+                                    Standard
+                                </button>
+                                <button 
+                                    onClick={() => setGlobalStudyMode('srs')}
+                                    className={`flex-1 py-1.5 px-3 rounded-md text-sm font-bold transition ${globalStudyMode === 'srs' ? 'bg-white text-indigo-600 shadow' : 'text-indigo-100 hover:bg-white/10'}`}
+                                >
+                                    Smart (SRS)
+                                </button>
+                            </div>
+
+                            <div className="flex items-center gap-2 mb-4 cursor-pointer" onClick={() => setGlobalShuffle(!globalShuffle)}>
+                                <div className={`w-5 h-5 rounded flex items-center justify-center border transition ${globalShuffle ? 'bg-white border-white text-indigo-600' : 'border-indigo-200 text-transparent'}`}>
+                                    <Check size={14} strokeWidth={4} />
+                                </div>
+                                <span className="text-sm font-medium text-indigo-50">Shuffle Cards</span>
+                            </div>
+
+                            <button 
+                                onClick={() => setIsGlobalStudy(true)}
+                                disabled={totalCards === 0}
+                                className="w-full bg-white text-indigo-600 font-bold py-3 rounded-lg hover:bg-indigo-50 transition disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                            >
+                                <Zap size={18}/> Start Studying
+                            </button>
+                        </div>
+                        <div className="bg-gradient-to-br from-red-500 to-rose-600 p-6 rounded-xl shadow-md text-white">
+                            <h3 className="font-bold text-lg mb-2 flex items-center gap-2"><FileQuestion/> Mock Exam</h3>
+                            <button onClick={() => setShowExamSetup(true)} disabled={totalExamQs === 0} className="w-full bg-white text-red-600 font-bold py-3 rounded-lg hover:bg-red-50 transition disabled:opacity-70 flex items-center justify-center gap-2"><Timer size={18}/> Build Exam</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            {showExamSetup && (
+                <ExamSetupModal 
+                    modules={decks} 
+                    onClose={() => setShowExamSetup(false)} 
+                    onStartExam={handleStartMockExam} 
+                />
+            )}
         </div>
     );
 };
@@ -684,21 +891,26 @@ const ManageModal = ({ type, items, onClose, onDeleteItem, onDeleteAll }) => {
                 <div className="flex-1 overflow-y-auto p-4 custom-scroll">
                     {items.length === 0 ? <div className="text-center text-slate-400 py-12">No items to show.</div> : (
                         <div className="space-y-2">
-                            {items.map((item, i) => (
-                                <div key={i} className="flex items-start gap-3 p-3 bg-slate-50 rounded-lg border border-slate-100 group hover:border-slate-300 transition">
-                                    <div className="flex flex-col items-center gap-1 mt-1">
-                                        <span className="text-xs font-bold text-slate-400">{i + 1}.</span>
-                                        {type === 'flashcards' && item.nextReview && <div className={`w-2 h-2 rounded-full ${getCardStatus(item).color.replace('text-', 'bg-').split(' ')[0]}`} title={getCardStatus(item).label}></div>}
-                                    </div>
-                                    <div className="flex-1 text-sm text-slate-700">
-                                        <div className="font-medium mb-1 flex items-center gap-2"><FormattedText text={item.q} /></div>
-                                        <div className="text-xs text-slate-500 line-clamp-1 opacity-70">
-                                            {type === 'flashcards' ? <FormattedText text={item.a} /> : (type === 'saq' ? 'Model Answer Provided' : 'Multiple Choice')}
+                            {items.map((item, i) => {
+                                const status = type === 'flashcards' ? getCardStatus(item) : null;
+                                return (
+                                    <div key={i} className="flex items-start gap-3 p-3 bg-slate-50 rounded-lg border border-slate-100 group hover:border-slate-300 transition">
+                                        <div className="flex flex-col items-center gap-1 mt-1">
+                                            <span className="text-xs font-bold text-slate-400">{i + 1}.</span>
+                                            {status && (
+                                                <div className={`w-2 h-2 rounded-full ${status.color.replace('text-', 'bg-').split(' ')[0]}`} title={status.label}></div>
+                                            )}
                                         </div>
+                                        <div className="flex-1 text-sm text-slate-700">
+                                            <div className="font-medium mb-1 flex items-center gap-2"><FormattedText text={item.q} /></div>
+                                            <div className="text-xs text-slate-500 line-clamp-1 opacity-70">
+                                                {type === 'flashcards' ? <FormattedText text={item.a} /> : (type === 'saq' ? 'Model Answer Provided' : 'Multiple Choice')}
+                                            </div>
+                                        </div>
+                                        <button onClick={() => onDeleteItem(i)} className="text-slate-400 hover:text-red-500 p-1 opacity-0 group-hover:opacity-100 transition" title="Delete Item"><Trash2 size={16}/></button>
                                     </div>
-                                    <button onClick={() => onDeleteItem(i)} className="text-slate-400 hover:text-red-500 p-1 opacity-0 group-hover:opacity-100 transition" title="Delete Item"><Trash2 size={16}/></button>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     )}
                 </div>
@@ -729,137 +941,6 @@ const NameModal = ({ isOpen, type, initialValue, onClose, onSave }) => {
                     </div>
                 </form>
             </div>
-        </div>
-    );
-};
-
-// --- FOLDER DASHBOARD (Added to fix crash) ---
-const FolderDashboard = ({ folder, decks, onUpdateFolder, apiKey }) => {
-    const [showExamSetup, setShowExamSetup] = useState(false);
-    const [activeExam, setActiveExam] = useState(null);
-
-    // Calculate aggregated stats
-    const totalCards = decks.reduce((acc, d) => acc + (d.cards?.length || 0), 0);
-    const totalQuestions = decks.reduce((acc, d) => acc + (d.quiz?.length || 0), 0);
-    const totalExams = decks.reduce((acc, d) => acc + (d.exams?.length || 0), 0);
-
-    // Collect all questions for the course-wide exam
-    const getAllQuestions = (moduleIds) => {
-        let allQs = [];
-        decks.filter(d => moduleIds.includes(d.id)).forEach(d => {
-            if (d.exams) allQs = [...allQs, ...d.exams];
-            if (d.quiz) allQs = [...allQs, ...d.quiz];
-            if (d.saqs) allQs = [...allQs, ...d.saqs];
-        });
-        return allQs;
-    };
-
-    const handleStartExam = (config) => {
-        const pool = getAllQuestions(config.moduleIds);
-        
-        // Filter by type
-        const mcqPool = pool.filter(q => q.type !== 'saq');
-        const saqPool = pool.filter(q => q.type === 'saq');
-
-        // Random Selection
-        const shuffle = (arr) => arr.sort(() => 0.5 - Math.random());
-        const selectedMCQs = shuffle(mcqPool).slice(0, config.numMCQs);
-        const selectedSAQs = shuffle(saqPool).slice(0, config.numSAQs);
-
-        const finalQuestions = [...selectedMCQs, ...selectedSAQs];
-        
-        if (finalQuestions.length === 0) return alert("No questions found in selected modules.");
-
-        setActiveExam({ questions: finalQuestions, timeLimit: config.timeLimit });
-        setShowExamSetup(false);
-    };
-
-    if (activeExam) {
-        return <ExamRunner questions={activeExam.questions} timeLimit={activeExam.timeLimit} onBack={() => setActiveExam(null)} apiKey={apiKey} />;
-    }
-
-    return (
-        <div className="max-w-6xl mx-auto p-6">
-            {/* Header */}
-            <div className="mb-8 border-b border-slate-200 pb-4">
-                <input 
-                    value={folder.name} 
-                    onChange={(e) => onUpdateFolder({...folder, name: e.target.value})} 
-                    className="text-3xl font-bold bg-transparent border-transparent hover:border-slate-200 focus:border-indigo-500 focus:outline-none w-full text-slate-800"
-                />
-                <p className="text-slate-500 mt-1">{decks.length} Modules • {totalCards} Cards • {totalQuestions + totalExams} Questions</p>
-            </div>
-
-            {/* Stats Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                <div className="bg-indigo-50 p-6 rounded-xl border border-indigo-100">
-                    <div className="flex items-center gap-3 mb-2">
-                        <div className="p-2 bg-indigo-100 rounded-lg text-indigo-600"><BookOpen size={20}/></div>
-                        <h3 className="font-bold text-indigo-900">Total Cards</h3>
-                    </div>
-                    <p className="text-3xl font-bold text-indigo-600">{totalCards}</p>
-                </div>
-                <div className="bg-emerald-50 p-6 rounded-xl border border-emerald-100">
-                    <div className="flex items-center gap-3 mb-2">
-                        <div className="p-2 bg-emerald-100 rounded-lg text-emerald-600"><Brain size={20}/></div>
-                        <h3 className="font-bold text-emerald-900">Practice Qs</h3>
-                    </div>
-                    <p className="text-3xl font-bold text-emerald-600">{totalQuestions}</p>
-                </div>
-                <div className="bg-purple-50 p-6 rounded-xl border border-purple-100">
-                    <div className="flex items-center gap-3 mb-2">
-                        <div className="p-2 bg-purple-100 rounded-lg text-purple-600"><PenTool size={20}/></div>
-                        <h3 className="font-bold text-purple-900">Exam Qs</h3>
-                    </div>
-                    <p className="text-3xl font-bold text-purple-600">{totalExams}</p>
-                </div>
-            </div>
-
-            {/* Actions */}
-            <div className="flex gap-4 mb-8">
-                <button 
-                    onClick={() => setShowExamSetup(true)} 
-                    className="flex-1 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white p-6 rounded-xl shadow-lg transition transform hover:-translate-y-1 flex flex-col items-center justify-center gap-2"
-                >
-                    <Award size={32} className="mb-2"/>
-                    <span className="font-bold text-lg">Start Course Exam</span>
-                    <span className="text-red-100 text-sm">Test knowledge across all modules</span>
-                </button>
-            </div>
-
-            {/* Module List */}
-            <h3 className="font-bold text-xl text-slate-800 mb-4">Modules</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {decks.map(deck => (
-                    <div key={deck.id} className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition group relative">
-                        <div className="flex justify-between items-start mb-4">
-                            <div className="p-3 bg-slate-100 rounded-lg text-slate-600 group-hover:bg-indigo-50 group-hover:text-indigo-600 transition">
-                                <Layers size={24}/>
-                            </div>
-                            <span className="text-xs font-bold bg-slate-100 text-slate-500 px-2 py-1 rounded">{deck.cards?.length || 0} cards</span>
-                        </div>
-                        <h4 className="font-bold text-lg text-slate-800 mb-1 line-clamp-1">{deck.title}</h4>
-                        <p className="text-sm text-slate-500 line-clamp-2 mb-4 h-10">{deck.notes ? deck.notes.substring(0, 100) : "No content notes yet."}</p>
-                        <div className="flex gap-2 text-sm text-slate-400">
-                           <span className="flex items-center gap-1"><Brain size={14}/> {deck.quiz?.length || 0}</span>
-                           <span className="flex items-center gap-1"><PenTool size={14}/> {deck.saqs?.length || 0}</span>
-                        </div>
-                    </div>
-                ))}
-                <div className="border-2 border-dashed border-slate-300 rounded-xl p-6 flex flex-col items-center justify-center text-slate-400 hover:border-indigo-400 hover:text-indigo-500 hover:bg-indigo-50 transition cursor-pointer min-h-[200px]">
-                    <Plus size={48} className="mb-2 opacity-50"/>
-                    <span className="font-bold">Create New Module</span>
-                    <span className="text-xs">Use sidebar to add</span>
-                </div>
-            </div>
-
-            {showExamSetup && (
-                <ExamSetupModal 
-                    modules={decks} 
-                    onClose={() => setShowExamSetup(false)} 
-                    onStartExam={handleStartExam} 
-                />
-            )}
         </div>
     );
 };
@@ -974,7 +1055,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
                 } else if (type === "exam") {
                     prompt = `Generate ${currentBatchCount} HARD, scenario-based multiple choice questions for a FINAL EXAM. Focus on application of knowledge, critical thinking, and synthesis. Return JSON: [{"q":..., "options":..., "a":..., "exp":...}].${avoidInstruction}`;
                 } else if (type === "saq") {
-                    prompt = `Generate ${currentBatchCount} Short Answer Questions (SAQ) testing deep understanding and application. Provide a comprehensive model answer for each. Return JSON: [{"q": "Question text...", "model": "Ideal detailed answer..."}].${avoidInstruction}`;
+                    prompt = `Generate ${currentBatchCount} Short Answer Questions (SAQ) testing deep understanding. Assign a mark value (2-7) based on complexity. Provide a comprehensive model answer. Return JSON: [{"q": "Question text...", "model": "Ideal answer...", "marks": 5}].${avoidInstruction}`;
                 } else {
                     prompt = `Generate ${currentBatchCount} multiple choice questions (JSON: [{"q":..., "options":..., "a":..., "exp":...}]).${avoidInstruction}`;
                 }
@@ -1353,154 +1434,6 @@ const FlashcardStudy = ({ cards, onBack, apiKey, onUpdateDeck, deck }) => {
     );
 };
 
-const QuizMode = ({ questions, onBack, deck }) => {
-    // Determine Mode
-    const isExam = deck?.quizMode === 'exam';
-
-    const [answers, setAnswers] = useState({});
-    const [submitted, setSubmitted] = useState(false);
-    const [timeLeft, setTimeLeft] = useState(questions.length * 90); // 1.5 mins per question
-
-    // Calculate Score
-    const score = Object.keys(answers).reduce((acc, key) => acc + (answers[key] === questions[key].a ? 1 : 0), 0);
-    const percentage = Math.round((score / questions.length) * 100);
-
-    // Timer Logic for Exam Mode
-    useEffect(() => {
-        if (isExam && !submitted && timeLeft > 0) {
-            const timer = setInterval(() => setTimeLeft(prev => prev - 1), 1000);
-            return () => clearInterval(timer);
-        } else if (timeLeft === 0 && !submitted) {
-            setSubmitted(true); // Auto-submit on time up
-        }
-    }, [isExam, submitted, timeLeft]);
-
-    // Format Time
-    const formatTime = (seconds) => {
-        const m = Math.floor(seconds / 60);
-        const s = seconds % 60;
-        return `${m}:${s < 10 ? '0' : ''}${s}`;
-    };
-
-    // Grade Calculation
-    const getGrade = (pct) => {
-        if (pct >= 85) return { grade: "HD", color: "text-emerald-600", text: "High Distinction" };
-        if (pct >= 75) return { grade: "D", color: "text-blue-600", text: "Distinction" };
-        if (pct >= 65) return { grade: "C", color: "text-indigo-600", text: "Credit" };
-        if (pct >= 50) return { grade: "P", color: "text-orange-600", text: "Pass" };
-        return { grade: "F", color: "text-red-600", text: "Fail" };
-    };
-
-    const grade = getGrade(percentage);
-
-    return (
-        <div className="max-w-3xl mx-auto p-6">
-            {/* Header */}
-            <div className="flex justify-between items-center mb-8 sticky top-0 bg-[#f8fafc] py-4 z-10 border-b">
-                <button onClick={onBack} className="flex gap-2 text-slate-500 hover:text-indigo-600 font-medium"><ChevronLeft/> Exit</button>
-                
-                {isExam && !submitted && (
-                    <div className={`font-mono font-bold text-xl flex items-center gap-2 ${timeLeft < 60 ? 'text-red-600 animate-pulse' : 'text-slate-700'}`}>
-                        <Clock size={20}/> {formatTime(timeLeft)}
-                    </div>
-                )}
-                
-                {submitted && (
-                    <div className="flex items-center gap-3">
-                         {isExam && <div className={`text-xl font-bold ${grade.color}`}>{grade.grade} ({percentage}%)</div>}
-                         {!isExam && <div className="bg-indigo-100 text-indigo-700 px-4 py-2 rounded-lg font-bold">Score: {score} / {questions.length}</div>}
-                    </div>
-                )}
-            </div>
-
-            {/* Results Screen for Exam Mode */}
-            {submitted && isExam && (
-                <div className="bg-white p-8 rounded-2xl shadow-lg border border-slate-200 text-center mb-8 animate-fade-in">
-                    <div className="inline-flex p-4 bg-slate-50 rounded-full mb-4">
-                        <Award size={48} className={grade.color} />
-                    </div>
-                    <h2 className="text-3xl font-bold text-slate-800 mb-2">{grade.text}</h2>
-                    <p className="text-slate-500 mb-6">You scored {score} out of {questions.length} ({percentage}%)</p>
-                    <div className="w-full bg-slate-100 h-3 rounded-full overflow-hidden">
-                        <div className={`h-full ${grade.color.replace('text-', 'bg-')}`} style={{ width: `${percentage}%` }}></div>
-                    </div>
-                </div>
-            )}
-
-            {/* Questions List */}
-            <div className="space-y-8 pb-12">
-                {questions.map((q, idx) => {
-                    const sel = answers[idx];
-                    const correct = q.a === idx;
-                    
-                    let status = "bg-white border-slate-200";
-                    if (submitted) {
-                        status = (sel === q.a) ? "bg-emerald-50 border-emerald-200" : (sel !== undefined ? "bg-red-50 border-red-200" : status);
-                    }
-                    
-                    return (
-                        <div key={idx} className={`p-6 rounded-xl border shadow-sm ${status}`}>
-                            <div className="font-medium text-lg mb-4 flex gap-3"><span className="text-slate-400 font-bold">{idx + 1}.</span><FormattedText text={q.q}/></div>
-                            <div className="space-y-2 pl-6">
-                                {q.options.map((opt, oIdx) => {
-                                    // Visual Logic for Options
-                                    let btnClass = `w-full text-left p-3 rounded-lg border transition flex gap-3 `;
-                                    
-                                    if (submitted) {
-                                        // In Exam Mode, show correct answers ONLY after submission
-                                        // In Practice Mode, highlight immediately
-                                        if (oIdx === q.a) btnClass += "bg-emerald-100 border-emerald-300 font-bold "; 
-                                        else if (sel === oIdx) btnClass += "bg-red-100 border-red-300 "; 
-                                        else btnClass += "opacity-60 ";
-                                    } else {
-                                        // Active State during selection
-                                        // In Practice Mode: Instant Feedback Logic
-                                        if (!isExam && sel !== undefined) {
-                                             if (oIdx === q.a) btnClass += "bg-emerald-100 border-emerald-300 font-bold ";
-                                             else if (sel === oIdx) btnClass += "bg-red-100 border-red-300 ";
-                                             else btnClass += "opacity-60 ";
-                                        } else {
-                                             btnClass += (sel === oIdx) ? "bg-indigo-50 border-indigo-400 ring-1 ring-indigo-400 " : "hover:bg-slate-50 ";
-                                        }
-                                    }
-
-                                    return (
-                                        <button key={oIdx} disabled={submitted && isExam} onClick={() => setAnswers({...answers, [idx]: oIdx})} className={btnClass}>
-                                            <div className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 ${sel === oIdx ? 'border-current' : 'border-slate-300'}`}>{sel === oIdx && <div className="w-2.5 h-2.5 rounded-full bg-current"></div>}</div>
-                                            <FormattedText text={opt}/>
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                            
-                            {/* Explanation logic:
-                                - Exam Mode: Show only after submit
-                                - Practice Mode: Show immediately if answer selected
-                            */}
-                            {(!isExam && sel !== undefined) || (isExam && submitted) ? (
-                                <div className="mt-4 ml-6 p-3 text-sm bg-white/50 rounded border text-slate-600 animate-fade-in">
-                                    <strong>Explanation:</strong> <FormattedText text={q.exp}/>
-                                </div>
-                            ) : null}
-                        </div>
-                    );
-                })}
-            </div>
-            
-            {(!submitted || !isExam) && (
-                <div className="sticky bottom-6 flex justify-center">
-                    <button 
-                        onClick={() => setSubmitted(true)} 
-                        className={`text-white font-bold py-3 px-8 rounded-full shadow-xl transition hover:-translate-y-1 ${isExam ? 'bg-red-600 hover:bg-red-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}
-                    >
-                        {isExam ? "Finish Exam" : "Submit Quiz"}
-                    </button>
-                </div>
-            )}
-        </div>
-    );
-};
-
 export default function App() {
     const [folders, setFolders] = useState(() => JSON.parse(localStorage.getItem('studyGenieFolders')) || [{ id: 1, name: 'General' }]);
     const [decks, setDecks] = useState(() => {
@@ -1558,7 +1491,7 @@ export default function App() {
                 onSettings={() => setShowSettings(true)}
             />
             <main className="flex-1 overflow-y-auto custom-scroll relative bg-[#f8fafc]">
-                {viewMode === 'folder' && activeFolder && <FolderDashboard folder={activeFolder} decks={decks.filter(d => d.folderId === activeFolder.id)} onUpdateFolder={updateFolder} apiKey={apiKey} />}
+                {viewMode === 'folder' && activeFolder && <FolderDashboard folder={activeFolder} decks={decks.filter(d => d.folderId === activeFolder.id)} onUpdateFolder={updateFolder} onUpdateDeck={updateDeck} apiKey={apiKey} />}
                 {viewMode === 'deck' && activeDeck && (
                     <>
                         {activeDeck.mode === 'dashboard' && <ModuleDashboard deck={activeDeck} onUpdateDeck={updateDeck} apiKey={apiKey} userProfile={userProfile} />}
