@@ -213,6 +213,15 @@ const Dashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
         onUpdateDeck({ ...deck, ...newInputs });
     };
 
+    const clearContent = (type) => {
+        const key = type === 'flashcards' ? 'cards' : 'quiz';
+        if (!deck[key] || deck[key].length === 0) return;
+        
+        if (confirm(`Are you sure you want to delete all ${type}? This action cannot be undone.`)) {
+            onUpdateDeck({ ...deck, [key]: [] });
+        }
+    };
+
     // --- SYSTEM PROMPT GENERATOR ---
     const getSystemInstruction = () => {
         let instruction = `You are an expert tutor specializing in ${inputs.courseName || "general studies"}.`;
@@ -460,11 +469,25 @@ const Dashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
                             <Brain size={18} className="text-slate-400"/> Stats
                         </h3>
                         <div className="grid grid-cols-2 gap-4">
-                            <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-100 flex flex-col items-center justify-center text-center">
+                            <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-100 flex flex-col items-center justify-center text-center relative group">
+                                <button 
+                                    onClick={() => clearContent('flashcards')}
+                                    className="absolute top-2 right-2 text-indigo-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition p-1"
+                                    title="Clear all flashcards"
+                                >
+                                    <Trash2 size={14} />
+                                </button>
                                 <div className="text-3xl font-bold text-indigo-600 mb-1">{deck.cards?.length || 0}</div>
                                 <div className="text-xs text-indigo-400 font-bold uppercase tracking-wider">Flashcards</div>
                             </div>
-                            <div className="bg-emerald-50 p-4 rounded-lg border border-emerald-100 flex flex-col items-center justify-center text-center">
+                            <div className="bg-emerald-50 p-4 rounded-lg border border-emerald-100 flex flex-col items-center justify-center text-center relative group">
+                                <button 
+                                    onClick={() => clearContent('quiz')}
+                                    className="absolute top-2 right-2 text-emerald-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition p-1"
+                                    title="Clear all questions"
+                                >
+                                    <Trash2 size={14} />
+                                </button>
                                 <div className="text-3xl font-bold text-emerald-600 mb-1">{deck.quiz?.length || 0}</div>
                                 <div className="text-xs text-emerald-400 font-bold uppercase tracking-wider">Questions</div>
                             </div>
