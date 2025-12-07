@@ -882,6 +882,9 @@ export default function App() {
     const [viewMode, setViewMode] = useState('deck'); 
     const [activeId, setActiveId] = useState(decks[0]?.id || null);
     const [showSettings, setShowSettings] = useState(false);
+    
+    // Name Modal State
+    const [nameModal, setNameModal] = useState({ isOpen: false, type: '', folder: null, value: '' });
 
     useEffect(() => {
         localStorage.setItem('studyGenieFolders', JSON.stringify(folders));
@@ -896,9 +899,21 @@ export default function App() {
     const updateDeck = (d) => setDecks(decks.map(x => x.id === d.id ? d : x));
     const updateFolder = (f) => setFolders(folders.map(x => x.id === f.id ? f : x));
     
-    const addFolder = () => { const n = prompt("Name:"); if(n) setFolders([...folders, { id: Date.now(), name: n }]); };
+    // New Folder / Rename Logic
+    const openAddFolder = () => setNameModal({ isOpen: true, type: 'create', folder: null, value: '' });
+    const openRenameFolder = (folder) => setNameModal({ isOpen: true, type: 'rename', folder: folder, value: folder.name });
+
+    const handleSaveName = (name) => {
+        if (nameModal.type === 'create') {
+            setFolders([...folders, { id: Date.now(), name }]);
+        } else {
+            setFolders(folders.map(f => f.id === nameModal.folder.id ? { ...f, name } : f));
+        }
+        setNameModal({ isOpen: false, type: '', folder: null, value: '' });
+    };
+
     const deleteFolder = (id) => { if(confirm("Delete folder?")) { setDecks(decks.filter(d => d.folderId !== id)); setFolders(folders.filter(f => f.id !== id)); setActiveId(null); }};
-    const addDeck = (fid) => { const nid = Date.now(); setDecks([...decks, { id: nid, folderId: fid, title: 'New Module', mode: 'dashboard' }]); setViewMode('deck'); setActiveId(nid); };
+    const addDeck = (fid) => { const nid = Date.now(); setDecks([...decks, { id: nid, folderId: fid, title: 'New Module', content: '', notes: '', transcript: '', slides: '', cards: [], quiz: [], mode: 'dashboard' }]); setViewMode('deck'); setActiveId(nid); };
     const deleteDeck = (id) => { if(confirm("Delete module?")) { const rem = decks.filter(d => d.id !== id); setDecks(rem); if(activeId === id) setActiveId(rem[0]?.id || null); }};
 
     return (
@@ -908,7 +923,8 @@ export default function App() {
                 folders={folders} decks={decks} activeId={activeId} viewMode={viewMode}
                 onSelectDeck={(id) => { setViewMode('deck'); setActiveId(id); if(decks.find(d=>d.id===id)) updateDeck({...decks.find(d=>d.id===id), mode: 'dashboard'}); }}
                 onSelectFolder={(id) => { setViewMode('folder'); setActiveId(id); }}
-                onAddFolder={addFolder} onDeleteFolder={deleteFolder} onAddDeck={addDeck} onDeleteDeck={deleteDeck}
+                onAddFolder={openAddFolder} onDeleteFolder={deleteFolder} onRenameFolder={openRenameFolder} 
+                onAddDeck={addDeck} onDeleteDeck={deleteDeck}
                 onSettings={() => setShowSettings(true)}
             />
             <main className="flex-1 overflow-y-auto custom-scroll relative bg-[#f8fafc]">
@@ -916,12 +932,23 @@ export default function App() {
                 {viewMode === 'deck' && activeDeck && (
                     <>
                         {activeDeck.mode === 'dashboard' && <ModuleDashboard deck={activeDeck} onUpdateDeck={updateDeck} apiKey={apiKey} userProfile={userProfile} />}
-                        {activeDeck.mode === 'flashcards' && <FlashcardStudy cards={activeDeck.cards} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} apiKey={apiKey} />}
-                        {activeDeck.mode === 'quiz' && <QuizMode questions={activeDeck.quiz} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} />}
+                        {activeDeck.mode === 'flashcards' && <FlashcardStudy cards={activeDeck.cards || []} deck={activeDeck} onUpdateDeck={updateDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} apiKey={apiKey} />}
+                        {activeDeck.mode === 'quiz' && <QuizMode questions={activeDeck.quiz || []} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} />}
                     </>
                 )}
+
                 {!activeDeck && !activeFolder && <div className="flex h-full items-center justify-center text-slate-400"><BookOpen size={48} className="opacity-50"/></div>}
             </main>
+
+            {/* Name Input Modal */}
+            <NameModal 
+                isOpen={nameModal.isOpen}
+                type={nameModal.type}
+                initialValue={nameModal.value}
+                onClose={() => setNameModal({ ...nameModal, isOpen: false })}
+                onSave={handleSaveName}
+            />
+
             {showSettings && (
                 <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
                     <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md">
