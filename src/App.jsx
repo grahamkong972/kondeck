@@ -4,7 +4,7 @@ import {
     Plus, Trash2, GraduationCap, FileText, Sparkles, 
     RotateCw, CheckCircle, XCircle, Folder, ChevronDown,
     Mic, Presentation, BookOpenText, PieChart, AlertCircle,
-    LayoutDashboard, Image as ImageIcon, X, FileType
+    LayoutDashboard, Image as ImageIcon, X, FileType, LogOut, Lock, Mail, Edit3
 } from 'lucide-react';
 
 // --- UTILS ---
@@ -316,6 +316,61 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, apiKey }) => {
     );
 };
 
+// --- MANAGE CONTENT MODAL ---
+const ManageModal = ({ type, items, onClose, onDeleteItem, onDeleteAll }) => {
+    return (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+                <div className="flex justify-between items-center p-6 border-b">
+                    <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
+                        {type === 'flashcards' ? <BookOpen className="text-indigo-500"/> : <Brain className="text-emerald-500"/>}
+                        Manage {type === 'flashcards' ? 'Flashcards' : 'Quiz Questions'}
+                    </h3>
+                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition"><X size={24}/></button>
+                </div>
+                
+                <div className="flex-1 overflow-y-auto p-4 custom-scroll">
+                    {items.length === 0 ? (
+                        <div className="text-center text-slate-400 py-12">No items to show.</div>
+                    ) : (
+                        <div className="space-y-2">
+                            {items.map((item, i) => (
+                                <div key={i} className="flex items-start gap-3 p-3 bg-slate-50 rounded-lg border border-slate-100 group hover:border-slate-300 transition">
+                                    <span className="text-xs font-bold text-slate-400 mt-1">{i + 1}.</span>
+                                    <div className="flex-1 text-sm text-slate-700">
+                                        <div className="font-medium mb-1"><FormattedText text={item.q} /></div>
+                                        <div className="text-xs text-slate-500 line-clamp-1 opacity-70">
+                                            {type === 'flashcards' ? <FormattedText text={item.a} /> : 'Multiple Choice'}
+                                        </div>
+                                    </div>
+                                    <button 
+                                        onClick={() => onDeleteItem(i)}
+                                        className="text-slate-400 hover:text-red-500 p-1 opacity-0 group-hover:opacity-100 transition"
+                                        title="Delete Item"
+                                    >
+                                        <Trash2 size={16}/>
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
+                <div className="p-4 border-t bg-slate-50 rounded-b-xl flex justify-between items-center">
+                    <span className="text-xs text-slate-500">{items.length} items total</span>
+                    <button 
+                        onClick={onDeleteAll}
+                        className="text-sm text-red-600 hover:text-red-800 font-medium flex items-center gap-2 px-4 py-2 hover:bg-red-50 rounded-lg transition"
+                    >
+                        <Trash2 size={16}/> Delete All
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+
 const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
     const [isGenerating, setIsGenerating] = useState(false);
     const [statusMessage, setStatusMessage] = useState("");
@@ -325,6 +380,9 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
     const fileInputRef = useRef(null);
     const [attachment, setAttachment] = useState(null);
     
+    // NEW: Management Modal State
+    const [manageMode, setManageMode] = useState(null); // 'flashcards' | 'quiz' | null
+
     const [inputs, setInputs] = useState({ notes: "", transcript: "", slides: "" });
 
     useEffect(() => {
@@ -338,10 +396,20 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
         onUpdateDeck({ ...deck, ...newInputs });
     };
 
-    const clearContent = (type) => {
-        const key = type === 'flashcards' ? 'cards' : 'quiz';
-        if (!deck[key] || deck[key].length === 0) return;
-        if (confirm(`Delete all ${type}?`)) onUpdateDeck({ ...deck, [key]: [] });
+    // DELETION HANDLERS
+    const handleDeleteItem = (index) => {
+        const key = manageMode === 'flashcards' ? 'cards' : 'quiz';
+        const newItems = [...(deck[key] || [])];
+        newItems.splice(index, 1);
+        onUpdateDeck({ ...deck, [key]: newItems });
+    };
+
+    const handleDeleteAll = () => {
+        const key = manageMode === 'flashcards' ? 'cards' : 'quiz';
+        if (confirm(`Delete ALL ${manageMode}? This cannot be undone.`)) {
+            onUpdateDeck({ ...deck, [key]: [] });
+            setManageMode(null);
+        }
     };
 
     const handleFileUpload = async (e) => {
@@ -379,13 +447,23 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
             const totalBatches = Math.ceil(count / BATCH_SIZE);
             let accumulatedResults = [];
 
+            // OVERLAP PREVENTION: Grab a sample of EXISTING items to exclude
+            const existingItems = genType === "flashcards" ? (deck.cards || []) : (deck.quiz || []);
+            // Take the last 30 items to provide fresh context to the AI
+            const existingSample = existingItems.slice(-30).map(item => item.q.substring(0, 30)).join(" | ");
+
             for (let i = 0; i < totalBatches; i++) {
                 setStatusMessage(`Generating batch ${i + 1} of ${totalBatches}...`);
                 if (i > 0) await sleep(1000);
 
                 const itemsRemaining = count - accumulatedResults.length;
                 const currentBatchCount = Math.min(BATCH_SIZE, itemsRemaining);
-                const avoidInstruction = accumulatedResults.length > 0 ? ` Do NOT repeat: ${accumulatedResults.slice(-5).map(item => item.q.substring(0, 15)).join(", ")}...` : "";
+                
+                // Combine existing items + new items from this session to avoid repeats
+                const currentSessionSample = accumulatedResults.map(item => item.q.substring(0, 30)).join(" | ");
+                const exclusionList = `${existingSample} | ${currentSessionSample}`;
+                
+                const avoidInstruction = exclusionList.length > 5 ? ` CRITICAL: Do NOT generate questions similar to these: [${exclusionList.substring(0, 500)}...]` : "";
 
                 let prompt = genType === "flashcards" 
                     ? `Generate ${currentBatchCount} flashcards (JSON: [{"q":..., "a":...}]).${avoidInstruction}`
@@ -393,13 +471,10 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
 
                 try {
                     const batchResult = await generateContent(apiKey, prompt, combinedContext, systemInstruction, attachmentPayload, currentBatchCount);
-                    
-                    // FIX: Ensure result is an array before spreading
+                    // Safe handling for result
                     const safeResult = Array.isArray(batchResult) ? batchResult : (batchResult ? [batchResult] : []);
-                    
                     accumulatedResults = [...accumulatedResults, ...safeResult];
                 } catch (batchError) { 
-                    alert(batchError.message);
                     console.error(batchError); break; 
                 }
             }
@@ -473,12 +548,12 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
                         <h3 className="font-semibold text-slate-700 mb-4 flex items-center gap-2"><Brain size={18}/> Stats</h3>
                         <div className="grid grid-cols-2 gap-4">
                             <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-100 flex flex-col items-center justify-center text-center relative group">
-                                <button onClick={() => clearContent('flashcards')} className="absolute top-2 right-2 text-indigo-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition p-1"><Trash2 size={14}/></button>
+                                <button onClick={() => setManageMode('flashcards')} className="absolute top-2 right-2 text-indigo-300 hover:text-indigo-600 opacity-0 group-hover:opacity-100 transition p-1" title="Manage Flashcards"><Edit3 size={14}/></button>
                                 <div className="text-3xl font-bold text-indigo-600 mb-1">{deck.cards?.length || 0}</div>
                                 <div className="text-xs text-indigo-400 font-bold uppercase">Cards</div>
                             </div>
                             <div className="bg-emerald-50 p-4 rounded-lg border border-emerald-100 flex flex-col items-center justify-center text-center relative group">
-                                <button onClick={() => clearContent('quiz')} className="absolute top-2 right-2 text-emerald-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition p-1"><Trash2 size={14}/></button>
+                                <button onClick={() => setManageMode('quiz')} className="absolute top-2 right-2 text-emerald-300 hover:text-emerald-600 opacity-0 group-hover:opacity-100 transition p-1" title="Manage Questions"><Edit3 size={14}/></button>
                                 <div className="text-3xl font-bold text-emerald-600 mb-1">{deck.quiz?.length || 0}</div>
                                 <div className="text-xs text-emerald-400 font-bold uppercase">Quiz</div>
                             </div>
@@ -496,6 +571,17 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
                     </div>
                 </div>
             </div>
+
+            {/* Management Modal */}
+            {manageMode && (
+                <ManageModal 
+                    type={manageMode}
+                    items={manageMode === 'flashcards' ? (deck.cards || []) : (deck.quiz || [])}
+                    onClose={() => setManageMode(null)}
+                    onDeleteItem={handleDeleteItem}
+                    onDeleteAll={handleDeleteAll}
+                />
+            )}
         </div>
     );
 };
