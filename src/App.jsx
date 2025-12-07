@@ -5,7 +5,7 @@ import {
     RotateCw, CheckCircle, XCircle, Folder, ChevronDown,
     Mic, Presentation, BookOpenText, PieChart, AlertCircle,
     LayoutDashboard, Image as ImageIcon, X, FileType, LogOut, Lock, Mail, Edit3, Edit2,
-    Clock, Layers, Zap
+    Clock, Layers, Zap, Tag
 } from 'lucide-react';
 
 // --- UTILS ---
@@ -26,6 +26,20 @@ const fileToBase64 = (file) => {
         };
         reader.onerror = (error) => reject(error);
     });
+};
+
+const getCardStatus = (card) => {
+    if (!card.nextReview) return { label: 'New', color: 'bg-blue-100 text-blue-700 border-blue-200' };
+    const now = Date.now();
+    if (card.nextReview <= now) return { label: 'Due', color: 'bg-orange-100 text-orange-700 border-orange-200' };
+    
+    // If interval was > 3 days, consider it "Mastered" / Review
+    // We can infer interval roughly by checking how far in future nextReview is, 
+    // but storing 'lastInterval' is better. For now, simple heuristic:
+    const oneDay = 24 * 60 * 60 * 1000;
+    if (card.nextReview > now + (3 * oneDay)) return { label: 'Mastered', color: 'bg-emerald-100 text-emerald-700 border-emerald-200' };
+    
+    return { label: 'Learning', color: 'bg-yellow-100 text-yellow-700 border-yellow-200' };
 };
 
 // --- NUCLEAR JSON PARSER ---
@@ -338,24 +352,37 @@ const ManageModal = ({ type, items, onClose, onDeleteItem, onDeleteAll }) => {
                         <div className="text-center text-slate-400 py-12">No items to show.</div>
                     ) : (
                         <div className="space-y-2">
-                            {items.map((item, i) => (
-                                <div key={i} className="flex items-start gap-3 p-3 bg-slate-50 rounded-lg border border-slate-100 group hover:border-slate-300 transition">
-                                    <span className="text-xs font-bold text-slate-400 mt-1">{i + 1}.</span>
-                                    <div className="flex-1 text-sm text-slate-700">
-                                        <div className="font-medium mb-1"><FormattedText text={item.q} /></div>
-                                        <div className="text-xs text-slate-500 line-clamp-1 opacity-70">
-                                            {type === 'flashcards' ? <FormattedText text={item.a} /> : 'Multiple Choice'}
+                            {items.map((item, i) => {
+                                // Calculate visual status badge for List Item
+                                const status = type === 'flashcards' ? getCardStatus(item) : null;
+                                
+                                return (
+                                    <div key={i} className="flex items-start gap-3 p-3 bg-slate-50 rounded-lg border border-slate-100 group hover:border-slate-300 transition">
+                                        <div className="flex flex-col items-center gap-1 mt-1">
+                                            <span className="text-xs font-bold text-slate-400">{i + 1}.</span>
+                                            {status && (
+                                                <div className={`w-2 h-2 rounded-full ${status.color.replace('text-', 'bg-').split(' ')[0]}`} title={status.label}></div>
+                                            )}
                                         </div>
+                                        <div className="flex-1 text-sm text-slate-700">
+                                            <div className="font-medium mb-1 flex items-center gap-2">
+                                                <FormattedText text={item.q} />
+                                                {status && <span className={`text-[10px] px-1.5 py-0.5 rounded border ${status.color}`}>{status.label}</span>}
+                                            </div>
+                                            <div className="text-xs text-slate-500 line-clamp-1 opacity-70">
+                                                {type === 'flashcards' ? <FormattedText text={item.a} /> : 'Multiple Choice'}
+                                            </div>
+                                        </div>
+                                        <button 
+                                            onClick={() => onDeleteItem(i)}
+                                            className="text-slate-400 hover:text-red-500 p-1 opacity-0 group-hover:opacity-100 transition"
+                                            title="Delete Item"
+                                        >
+                                            <Trash2 size={16}/>
+                                        </button>
                                     </div>
-                                    <button 
-                                        onClick={() => onDeleteItem(i)}
-                                        className="text-slate-400 hover:text-red-500 p-1 opacity-0 group-hover:opacity-100 transition"
-                                        title="Delete Item"
-                                    >
-                                        <Trash2 size={16}/>
-                                    </button>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     )}
                 </div>
@@ -765,6 +792,9 @@ const FlashcardStudy = ({ cards, onBack, apiKey, onUpdateDeck, deck }) => {
     
     if (!currentCard) return <div>Loading...</div>;
 
+    // Get status for badge
+    const status = getCardStatus(currentCard);
+
     return (
         <div className="h-full flex flex-col p-6 max-w-4xl mx-auto w-full">
             <button onClick={onBack} className="self-start mb-4 flex gap-2 text-slate-500 hover:text-indigo-600 font-medium"><ChevronLeft/> Back</button>
@@ -781,6 +811,10 @@ const FlashcardStudy = ({ cards, onBack, apiKey, onUpdateDeck, deck }) => {
                 <div className="w-full max-w-2xl h-96 relative cursor-pointer" onClick={() => setFlipped(!flipped)}>
                     <div className="w-full h-full relative shadow-2xl rounded-2xl" style={{ transformStyle: 'preserve-3d', transition: 'transform 0.6s', transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)' }}>
                         <div className="absolute w-full h-full bg-white rounded-2xl backface-hidden flex flex-col items-center justify-center p-8 border" style={{ backfaceVisibility: 'hidden' }}>
+                            {/* STATUS BADGE */}
+                            <span className={`absolute top-6 right-6 px-3 py-1 rounded-full text-xs font-bold border ${status.color}`}>
+                                {status.label}
+                            </span>
                             <div className="text-2xl font-medium text-center"><FormattedText text={currentCard.q}/></div>
                             <div className="absolute bottom-6 text-slate-400 text-sm animate-pulse">Click to Flip</div>
                         </div>
