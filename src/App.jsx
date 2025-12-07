@@ -67,7 +67,6 @@ const getCardStatus = (card) => {
 };
 
 // --- DATA SANITIZER ---
-// Ensures that data returned by AI matches the shape we expect, preventing crashes.
 const validateAndFixData = (data, type) => {
     if (!Array.isArray(data)) return [];
     
@@ -77,52 +76,44 @@ const validateAndFixData = (data, type) => {
             return {
                 q: String(item.q || "Error: Question missing"),
                 a: String(item.a || "Error: Answer missing"),
-                // Preserve existing SRS data if this is an update, or init new
                 nextReview: item.nextReview || null 
             };
         }
         // Fix MCQs
         if (type === 'mcq') {
             let options = item.options;
-            // If options is a string (AI error), try to split it
             if (typeof options === 'string') {
                 options = options.split(',').map(s => s.trim());
             }
-            // Ensure options is an array
             if (!Array.isArray(options)) options = ["True", "False"]; 
             
             return {
                 q: String(item.q || "Error: Question missing"),
                 options: options.map(String),
-                a: typeof item.a === 'number' ? item.a : 0, // Ensure index is number
+                a: typeof item.a === 'number' ? item.a : 0, 
                 exp: String(item.exp || "No explanation provided.")
             };
         }
         return item;
-    }).filter(item => item); // Remove nulls
+    }).filter(item => item); 
 };
 
 // --- NUCLEAR JSON PARSER ---
 const cleanAndParseJSON = (text) => {
     let clean = text.replace(/```json/g, '').replace(/```/g, '').trim();
+    // Only double-escape backslashes that aren't already escaped JSON characters
     clean = clean.replace(/\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})/g, "\\\\");
 
     try {
         return JSON.parse(clean);
     } catch (e) {
+        // Basic recovery for truncated arrays
         if (clean.startsWith('[') && !clean.endsWith(']')) {
             const lastClose = clean.lastIndexOf('}');
             if (lastClose !== -1) {
                 const fixed = clean.substring(0, lastClose + 1) + ']';
                 try { return JSON.parse(fixed); } catch (e2) { console.error("Repair failed", e2); }
             }
-        }
-        if (clean.startsWith('{') && !clean.endsWith('}')) {
-             const lastQuote = clean.lastIndexOf('"');
-             if (lastQuote !== -1) {
-                 const fixed = clean.substring(0, lastQuote + 1) + '"}';
-                 try { return JSON.parse(fixed); } catch(e3) { console.error("Object repair failed", e3); }
-             }
         }
         console.error("JSON Parse Error:", e);
         throw new Error("Failed to parse AI response.");
@@ -184,22 +175,20 @@ const FormattedText = ({ text, className = "" }) => {
     );
 };
 
-// --- GEMINI AI SERVICE (DIRECT CLIENT MODE) ---
+// --- GEMINI AI SERVICE ---
 const generateContent = async (apiKey, prompt, context, systemInstruction, attachmentData = null, quantity = 1) => {
     if (!apiKey) throw new Error("API Key is missing. Please add your own Google Gemini Key in Settings.");
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
     
+    // Simpler prompt because we are using responseSchema (JSON Mode)
     const fullSystemPrompt = `
         You are StudyGenie, an advanced AI tutor.
         ${systemInstruction || ''}
-        CRITICAL OUTPUT RULES:
-        1. Return ONLY valid JSON.
-        2. Do NOT use markdown code blocks.
-        3. Double-escape all backslashes in LaTeX (e.g. \\\\alpha).
-        4. Use HTML <br/> for line breaks.
-        5. Use MARKDOWN for text formatting (e.g. **bold**).
-        6. Use LaTeX ($...$) ONLY for mathematical formulas.
+        OUTPUT RULES:
+        1. Double-escape all backslashes in LaTeX (e.g. \\\\alpha).
+        2. Use MARKDOWN for text formatting (e.g. **bold**).
+        3. Use LaTeX ($...$) ONLY for mathematical formulas.
     `;
 
     const contentsPart = [{ text: `CONTEXT:\n${context}\n\nTASK:\n${prompt}` }];
@@ -215,7 +204,11 @@ const generateContent = async (apiKey, prompt, context, systemInstruction, attac
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     contents: [{ parts: contentsPart }],
-                    system_instruction: { parts: [{ text: fullSystemPrompt }] }
+                    system_instruction: { parts: [{ text: fullSystemPrompt }] },
+                    // FORCE JSON MODE: This is the fix for reliability
+                    generationConfig: {
+                        responseMimeType: "application/json"
+                    }
                 })
             });
 
@@ -229,6 +222,8 @@ const generateContent = async (apiKey, prompt, context, systemInstruction, attac
             const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
             if (!text) throw new Error("No content generated.");
 
+            // Since we use responseMimeType="application/json", the text is ALREADY clean JSON.
+            // We just need minimal cleanup for LaTeX backslashes if the model missed double-escaping.
             return cleanAndParseJSON(text);
 
         } catch (error) {
@@ -239,7 +234,7 @@ const generateContent = async (apiKey, prompt, context, systemInstruction, attac
     }
 };
 
-// ... Sidebar, AuthPage, FolderDashboard, ManageModal, NameModal are same as previous ...
+// ... Sidebar, AuthPage, FolderDashboard, ManageModal, NameModal are same ...
 
 // --- APP COMPONENTS ---
 
@@ -652,7 +647,8 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
             let attachmentPayload = null;
             if (attachment?.file) attachmentPayload = await fileToBase64(attachment.file);
 
-            const BATCH_SIZE = (type === 'mcq') ? 3 : 5; // Reduced batch size for MCQs to avoid tokens limit
+            // BATCH SIZING: Flashcards = 20, MCQs = 10 (High performance limits)
+            const BATCH_SIZE = (type === 'mcq') ? 10 : 20; 
             const totalBatches = Math.ceil(count / BATCH_SIZE);
             let accumulatedResults = [];
 
@@ -804,10 +800,18 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
                              </button>
                         </div>
 
-                        <button onClick={() => onUpdateDeck({...deck, mode: 'quiz'})} disabled={!deck.quiz?.length} className="group w-full bg-white border border-slate-200 hover:border-emerald-500 hover:shadow-md p-4 rounded-xl text-left transition disabled:opacity-50">
-                            <div className="flex items-center justify-between mb-1"><span className="font-bold text-slate-800 group-hover:text-emerald-600">Practice Quiz</span><Brain size={20} className="text-emerald-500"/></div>
-                            <p className="text-sm text-slate-500">Test retention.</p>
-                        </button>
+                        <div className="bg-white p-4 rounded-xl border border-slate-200">
+                            <div className="flex justify-between items-center mb-3">
+                                <span className="font-bold text-slate-700">Quiz Mode</span>
+                                <div className="flex bg-slate-100 rounded-lg p-1">
+                                    <button onClick={() => toggleQuizMode('practice')} className={`px-3 py-1 rounded-md text-xs font-bold transition ${(!deck.quizMode || deck.quizMode === 'practice') ? 'bg-white shadow text-emerald-600' : 'text-slate-500'}`}>Practice</button>
+                                    <button onClick={() => toggleQuizMode('exam')} className={`px-3 py-1 rounded-md text-xs font-bold transition ${deck.quizMode === 'exam' ? 'bg-white shadow text-emerald-600' : 'text-slate-500'}`}>Exam</button>
+                                </div>
+                            </div>
+                            <button onClick={() => onUpdateDeck({...deck, mode: 'quiz'})} disabled={!deck.quiz?.length} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                                <Brain size={18}/> Start Quiz
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1139,7 +1143,14 @@ const QuizMode = ({ questions, onBack, deck }) => {
                                         else btnClass += "opacity-60 ";
                                     } else {
                                         // Active State during selection
-                                        btnClass += (sel === oIdx) ? "bg-indigo-50 border-indigo-400 ring-1 ring-indigo-400 " : "hover:bg-slate-50 ";
+                                        // In Practice Mode: Instant Feedback Logic
+                                        if (!isExam && sel !== undefined) {
+                                             if (oIdx === q.a) btnClass += "bg-emerald-100 border-emerald-300 font-bold ";
+                                             else if (sel === oIdx) btnClass += "bg-red-100 border-red-300 ";
+                                             else btnClass += "opacity-60 ";
+                                        } else {
+                                             btnClass += (sel === oIdx) ? "bg-indigo-50 border-indigo-400 ring-1 ring-indigo-400 " : "hover:bg-slate-50 ";
+                                        }
                                     }
 
                                     return (
