@@ -4,35 +4,8 @@ import {
     Plus, Trash2, GraduationCap, FileText, Sparkles, 
     RotateCw, CheckCircle, XCircle, Folder, ChevronDown,
     Mic, Presentation, BookOpenText, PieChart, AlertCircle,
-    LayoutDashboard, Image as ImageIcon, X, FileType, LogOut, Lock, Mail
+    LayoutDashboard, Image as ImageIcon, X, FileType
 } from 'lucide-react';
-
-// --- FIREBASE IMPORTS ---
-import { initializeApp } from "firebase/app";
-import { 
-    getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, 
-    signOut, onAuthStateChanged 
-} from "firebase/auth";
-import { 
-    getFirestore, collection, addDoc, updateDoc, deleteDoc, 
-    doc, onSnapshot, query, orderBy, setDoc, getDoc, serverTimestamp 
-} from "firebase/firestore";
-
-// --- CONFIGURATION ---
-const firebaseConfig = {
-  apiKey: "AIzaSyCqowVnkUXzjgutGHRKKptEm5NjCl7C4yQ",
-  authDomain: "studygenie-691e5.firebaseapp.com",
-  projectId: "studygenie-691e5",
-  storageBucket: "studygenie-691e5.firebasestorage.app",
-  messagingSenderId: "524154104312",
-  appId: "1:524154104312:web:bc5f8b1d46ce9ee6e8ce0d",
-  measurementId: "G-BVLGXPV56E"
-};
-
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
 
 // --- UTILS ---
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -55,31 +28,16 @@ const fileToBase64 = (file) => {
 };
 
 // --- NUCLEAR JSON PARSER ---
-// Completely rebuilds the string to be safe for JSON.parse
 const cleanAndParseJSON = (text) => {
-    // 1. Remove Markdown Code Blocks
     let clean = text.replace(/```json/g, '').replace(/```/g, '').trim();
-
-    // 2. Escape Logic Strategy:
-    //    The AI often returns LaTeX like "\sigma" inside a JSON string.
-    //    JSON requires this to be "\\sigma".
-    //    However, it also returns "\n" for newlines, which MUST remain "\n" (or "\\n" depending on raw vs string).
-    
-    // Step A: Replace single backslashes with double backslashes, BUT ignore known valid JSON escapes.
-    // We use a negative lookahead to ignore: ", \, /, b, f, n, r, t, u
-    // AND we specifically check for \u followed by 4 hex digits (valid unicode) to avoid breaking "\usepackage"
-    
     clean = clean.replace(/\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})/g, "\\\\");
 
-    // 3. Handle truncated responses (Self-Healing)
     try {
         return JSON.parse(clean);
     } catch (e) {
-        // If it failed, it might be because of a hanging comma or cut-off bracket
         if (clean.startsWith('[') && !clean.endsWith(']')) {
             const lastClose = clean.lastIndexOf('}');
             if (lastClose !== -1) {
-                // Cut off garbage and close the array
                 const fixed = clean.substring(0, lastClose + 1) + ']';
                 try { return JSON.parse(fixed); } catch (e2) { console.error("Repair failed", e2); }
             }
@@ -91,10 +49,8 @@ const cleanAndParseJSON = (text) => {
                  try { return JSON.parse(fixed); } catch(e3) { console.error("Object repair failed", e3); }
              }
         }
-        
         console.error("JSON Parse Error:", e);
-        console.log("Failed Text:", clean);
-        throw new Error("Failed to parse AI response. The content may contain complex LaTeX that broke the format.");
+        throw new Error("Failed to parse AI response.");
     }
 };
 
@@ -198,7 +154,6 @@ const generateContent = async (apiKey, prompt, context, systemInstruction, attac
             const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
             if (!text) throw new Error("No content generated.");
 
-            // USE THE NEW PARSER
             return cleanAndParseJSON(text);
 
         } catch (error) {
@@ -207,96 +162,6 @@ const generateContent = async (apiKey, prompt, context, systemInstruction, attac
             await sleep(2000 * (attempt + 1)); 
         }
     }
-};
-
-// --- AUTH COMPONENT ---
-const AuthPage = () => {
-    const [isLogin, setIsLogin] = useState(true);
-    const [email, setEmail] = useState("");
-    const [password, setPassword] = useState("");
-    const [error, setError] = useState("");
-    const [loading, setLoading] = useState(false);
-
-    const handleAuth = async (e) => {
-        e.preventDefault();
-        setError("");
-        setLoading(true);
-        try {
-            if (isLogin) {
-                await signInWithEmailAndPassword(auth, email, password);
-            } else {
-                await createUserWithEmailAndPassword(auth, email, password);
-            }
-        } catch (err) {
-            setError(err.message.replace("Firebase: ", ""));
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    return (
-        <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-8">
-                <div className="text-center mb-8">
-                    <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-indigo-100 text-indigo-600 mb-4">
-                        <GraduationCap size={24} />
-                    </div>
-                    <h1 className="text-2xl font-bold text-slate-900">Welcome to StudyGenie</h1>
-                    <p className="text-slate-500 mt-2">Your AI-powered study companion.</p>
-                </div>
-
-                <form onSubmit={handleAuth} className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
-                        <div className="relative">
-                            <Mail className="absolute left-3 top-3 text-slate-400" size={18} />
-                            <input 
-                                type="email" 
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                                className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                                placeholder="student@university.edu"
-                                required
-                            />
-                        </div>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
-                        <div className="relative">
-                            <Lock className="absolute left-3 top-3 text-slate-400" size={18} />
-                            <input 
-                                type="password" 
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                                placeholder="••••••••"
-                                required
-                            />
-                        </div>
-                    </div>
-
-                    {error && <div className="text-red-500 text-sm bg-red-50 p-3 rounded-lg flex items-center gap-2"><AlertCircle size={14}/> {error}</div>}
-
-                    <button 
-                        type="submit" 
-                        disabled={loading}
-                        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70"
-                    >
-                        {loading ? <RotateCw className="animate-spin" size={20}/> : (isLogin ? "Sign In" : "Create Account")}
-                    </button>
-                </form>
-
-                <div className="mt-6 text-center">
-                    <button 
-                        onClick={() => setIsLogin(!isLogin)}
-                        className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
-                    >
-                        {isLogin ? "Need an account? Sign Up" : "Already have an account? Sign In"}
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
 };
 
 // --- APP COMPONENTS ---
@@ -366,9 +231,8 @@ const Sidebar = ({ folders, decks, activeId, viewMode, onSelectDeck, onSelectFol
                 ))}
             </div>
             
-            <div className="p-4 border-t border-slate-800 shrink-0 space-y-2">
+            <div className="p-4 border-t border-slate-800 shrink-0">
                 <button onClick={onAddFolder} className="w-full flex items-center justify-center gap-2 p-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-sm text-slate-300 hover:text-white transition font-medium border border-slate-700"><Plus size={16} /> New Folder</button>
-                <button onClick={() => signOut(auth)} className="w-full flex items-center justify-center gap-2 p-2.5 hover:bg-red-900/30 text-slate-400 hover:text-red-400 rounded-lg text-sm transition"><LogOut size={16}/> Sign Out</button>
             </div>
         </div>
     );
@@ -392,7 +256,6 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, apiKey }) => {
             const prompt = `Analyze 'STUDENT MATERIALS' against 'OFFICIAL SYLLABUS'. Return JSON: {"score": 0-100, "analysis": "summary", "missing": "missing topics"}`;
             const context = `OFFICIAL SYLLABUS:\n${syllabusText}\n\nSTUDENT MATERIALS:\n${allContent}`;
 
-            // Count this as 1 item for usage limit
             const result = await generateContent(apiKey, prompt, context, "", null, 1);
             onUpdateFolder({ ...folder, syllabus: syllabusText, coverage: result });
         } catch (error) { 
@@ -472,7 +335,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
     const handleInputChange = (field, value) => {
         const newInputs = { ...inputs, [field]: value };
         setInputs(newInputs);
-        onUpdateDeck({ ...deck, ...newInputs }); // Autosave to DB
+        onUpdateDeck({ ...deck, ...newInputs });
     };
 
     const clearContent = (type) => {
@@ -532,7 +395,6 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
                     const batchResult = await generateContent(apiKey, prompt, combinedContext, systemInstruction, attachmentPayload, currentBatchCount);
                     
                     // FIX: Ensure result is an array before spreading
-                    // If AI returns a single object or null, wrap it in array
                     const safeResult = Array.isArray(batchResult) ? batchResult : (batchResult ? [batchResult] : []);
                     
                     accumulatedResults = [...accumulatedResults, ...safeResult];
@@ -744,124 +606,34 @@ const QuizMode = ({ questions, onBack }) => {
 };
 
 export default function App() {
-    const [user, setUser] = useState(null);
-    const [loadingAuth, setLoadingAuth] = useState(true);
-    
-    // Data State (Now synced with Firestore)
-    const [folders, setFolders] = useState([]);
-    const [decks, setDecks] = useState([]);
-    const [userProfile, setUserProfile] = useState({ age: '', degree: '' });
-    const [apiKey, setApiKey] = useState('');
-    
+    const [folders, setFolders] = useState(() => JSON.parse(localStorage.getItem('studyGenieFolders')) || [{ id: 1, name: 'General' }]);
+    const [decks, setDecks] = useState(() => {
+        const d = JSON.parse(localStorage.getItem('studyGenieData')) || [{ id: 101, folderId: 1, title: 'Example Module' }];
+        return d.map(x => x.folderId ? x : { ...x, folderId: 1 });
+    });
+    const [userProfile, setUserProfile] = useState(() => JSON.parse(localStorage.getItem('studyGenieProfile')) || { age: '', degree: '' });
+    const [apiKey, setApiKey] = useState(() => localStorage.getItem('geminiKey') || '');
     const [viewMode, setViewMode] = useState('deck'); 
-    const [activeId, setActiveId] = useState(null);
+    const [activeId, setActiveId] = useState(decks[0]?.id || null);
     const [showSettings, setShowSettings] = useState(false);
 
-    // Auth Listener
     useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-            setUser(currentUser);
-            setLoadingAuth(false);
-        });
-        return () => unsubscribe();
-    }, []);
+        localStorage.setItem('studyGenieFolders', JSON.stringify(folders));
+        localStorage.setItem('studyGenieData', JSON.stringify(decks));
+        localStorage.setItem('studyGenieProfile', JSON.stringify(userProfile));
+        localStorage.setItem('geminiKey', apiKey);
+    }, [folders, decks, userProfile, apiKey]);
 
-    // Firestore Listeners (Run only when logged in)
-    useEffect(() => {
-        if (!user) return;
-
-        // Sync Folders
-        const qFolders = query(collection(db, `users/${user.uid}/folders`), orderBy('createdAt', 'desc'));
-        const unsubFolders = onSnapshot(qFolders, (snapshot) => {
-            setFolders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-        });
-
-        // Sync Decks
-        const qDecks = query(collection(db, `users/${user.uid}/decks`), orderBy('createdAt', 'desc'));
-        const unsubDecks = onSnapshot(qDecks, (snapshot) => {
-            setDecks(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-        });
-
-        // Sync Settings/Profile
-        const profileRef = doc(db, `users/${user.uid}/settings`, 'profile');
-        getDoc(profileRef).then(snap => {
-            if (snap.exists()) {
-                const data = snap.data();
-                setUserProfile(data.userProfile || { age: '', degree: '' });
-                setApiKey(data.apiKey || '');
-            }
-        });
-
-        return () => { unsubFolders(); unsubDecks(); };
-    }, [user]);
-
-    // Save Settings to Firestore
-    const saveSettings = async () => {
-        if (!user) return;
-        try {
-            await setDoc(doc(db, `users/${user.uid}/settings`, 'profile'), {
-                userProfile, apiKey
-            }, { merge: true });
-            setShowSettings(false);
-        } catch (e) { alert("Failed to save settings: " + e.message); }
-    };
-
-    // Actions (Updated for Firestore)
     const activeDeck = viewMode === 'deck' ? decks.find(d => d.id === activeId) : null;
     const activeFolder = viewMode === 'folder' ? folders.find(f => f.id === activeId) : null;
 
-    const addFolder = async () => {
-        const name = prompt("Enter folder name:");
-        if (name && user) {
-            try {
-                await addDoc(collection(db, `users/${user.uid}/folders`), {
-                    name, createdAt: serverTimestamp()
-                });
-            } catch (error) {
-                console.error("Error adding folder:", error);
-                alert("Failed to add folder. Check console for details. (Likely Firestore Permissions)");
-            }
-        }
-    };
-
-    const deleteFolder = async (folderId) => {
-        if (!confirm("Delete folder and all contents?")) return;
-        await deleteDoc(doc(db, `users/${user.uid}/folders`, folderId));
-        const decksToDelete = decks.filter(d => d.folderId === folderId);
-        for (const d of decksToDelete) {
-            await deleteDoc(doc(db, `users/${user.uid}/decks`, d.id));
-        }
-        setActiveId(null);
-    };
-
-    const addDeck = async (folderId) => {
-        if (!user) return;
-        const ref = await addDoc(collection(db, `users/${user.uid}/decks`), {
-            folderId, title: 'New Module', content: '', notes: '', transcript: '', slides: '',
-            cards: [], quiz: [], mode: 'dashboard', createdAt: serverTimestamp()
-        });
-        setViewMode('deck');
-        setActiveId(ref.id);
-    };
-
-    const updateDeck = async (updatedDeck) => {
-        if (!user) return;
-        await updateDoc(doc(db, `users/${user.uid}/decks`, updatedDeck.id), updatedDeck);
-    };
-
-    const deleteDeck = async (id) => {
-        if(confirm("Delete module?")) {
-            await deleteDoc(doc(db, `users/${user.uid}/decks`, id));
-            if(activeId === id) setActiveId(null);
-        }
-    };
-
-    const updateFolder = async (updatedFolder) => {
-        await updateDoc(doc(db, `users/${user.uid}/folders`, updatedFolder.id), updatedFolder);
-    };
-
-    if (loadingAuth) return <div className="h-screen flex items-center justify-center"><RotateCw className="animate-spin text-indigo-600"/></div>;
-    if (!user) return <AuthPage />;
+    const updateDeck = (d) => setDecks(decks.map(x => x.id === d.id ? d : x));
+    const updateFolder = (f) => setFolders(folders.map(x => x.id === f.id ? f : x));
+    
+    const addFolder = () => { const n = prompt("Name:"); if(n) setFolders([...folders, { id: Date.now(), name: n }]); };
+    const deleteFolder = (id) => { if(confirm("Delete folder?")) { setDecks(decks.filter(d => d.folderId !== id)); setFolders(folders.filter(f => f.id !== id)); setActiveId(null); }};
+    const addDeck = (fid) => { const nid = Date.now(); setDecks([...decks, { id: nid, folderId: fid, title: 'New Module', mode: 'dashboard' }]); setViewMode('deck'); setActiveId(nid); };
+    const deleteDeck = (id) => { if(confirm("Delete module?")) { const rem = decks.filter(d => d.id !== id); setDecks(rem); if(activeId === id) setActiveId(rem[0]?.id || null); }};
 
     return (
         <div className="flex h-screen bg-[#f8fafc] font-sans text-slate-900">
@@ -896,7 +668,7 @@ export default function App() {
                                     <input placeholder="Degree" value={userProfile.degree} onChange={e=>setUserProfile({...userProfile, degree: e.target.value})} className="p-2 border rounded"/>
                                 </div>
                             </div>
-                            <button onClick={saveSettings} className="w-full bg-indigo-600 text-white font-bold py-2 rounded">Save</button>
+                            <button onClick={() => setShowSettings(false)} className="w-full bg-indigo-600 text-white font-bold py-2 rounded">Save</button>
                         </div>
                     </div>
                 </div>
