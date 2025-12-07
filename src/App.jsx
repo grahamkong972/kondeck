@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { 
     BookOpen, Brain, ChevronLeft, ChevronRight, Settings, 
     Plus, Trash2, GraduationCap, FileText, Sparkles, 
-    RotateCw, CheckCircle, XCircle, Folder, ChevronDown 
+    RotateCw, CheckCircle, XCircle, Folder, ChevronDown,
+    Mic, Presentation // Added new icons
 } from 'lucide-react';
 
 // --- GEMINI AI SERVICE ---
@@ -137,26 +138,64 @@ const Sidebar = ({ folders, decks, activeDeckId, onSelectDeck, onAddFolder, onDe
 // 2. Input & Dashboard
 const Dashboard = ({ deck, onUpdateDeck, apiKey }) => {
     const [isGenerating, setIsGenerating] = useState(false);
-    const [inputText, setInputText] = useState(deck.content || "");
-    const [genType, setGenType] = useState("flashcards"); // or 'mcq'
+    const [genType, setGenType] = useState("flashcards");
     const [count, setCount] = useState(5);
+    const [activeTab, setActiveTab] = useState('notes');
+    
+    // State for the three input types, initializing from deck or falling back to 'content'
+    const [inputs, setInputs] = useState({
+        notes: deck.notes || deck.content || "",
+        transcript: deck.transcript || "",
+        slides: deck.slides || ""
+    });
+
+    // Sync state when deck changes
+    useEffect(() => {
+        setInputs({
+            notes: deck.notes || deck.content || "",
+            transcript: deck.transcript || "",
+            slides: deck.slides || ""
+        });
+    }, [deck.id]);
+
+    const handleInputChange = (field, value) => {
+        const newInputs = { ...inputs, [field]: value };
+        setInputs(newInputs);
+        // Save to deck immediately (could debounce for performance in large apps)
+        onUpdateDeck({ ...deck, ...newInputs });
+    };
 
     const handleGenerate = async () => {
-        if (!inputText.trim()) return alert("Please enter some notes first!");
+        // Check if at least one field has text
+        if (!inputs.notes.trim() && !inputs.transcript.trim() && !inputs.slides.trim()) {
+            return alert("Please enter content in at least one tab (Notes, Transcript, or Slides)!");
+        }
         if (!apiKey) return alert("Please enter your API Key in Settings.");
 
         setIsGenerating(true);
         try {
+            // Construct a comprehensive context from all inputs
+            const combinedContext = `
+                LECTURE NOTES:
+                ${inputs.notes}
+
+                LECTURE TRANSCRIPT:
+                ${inputs.transcript}
+
+                SLIDES CONTENT:
+                ${inputs.slides}
+            `;
+
             let prompt = "";
             if (genType === "flashcards") {
-                prompt = `Generate ${count} difficult flashcards from the context. Focus on key concepts, definitions, and relationships.`;
+                prompt = `Generate ${count} difficult flashcards from the provided context. Focus on key concepts, definitions, and relationships found across the notes, transcript, and slides.`;
             } else {
-                prompt = `Generate ${count} multiple choice questions with 4 options each from the context. Ensure the questions test understanding, not just recall.`;
+                prompt = `Generate ${count} multiple choice questions with 4 options each from the provided context. Ensure the questions test deep understanding.`;
             }
 
-            const result = await generateContent(apiKey, prompt, inputText);
+            const result = await generateContent(apiKey, prompt, combinedContext);
             
-            const updatedDeck = { ...deck, content: inputText };
+            const updatedDeck = { ...deck, ...inputs }; // Ensure current text is saved
             if (genType === "flashcards") {
                 updatedDeck.cards = [...(deck.cards || []), ...result];
             } else {
@@ -171,8 +210,25 @@ const Dashboard = ({ deck, onUpdateDeck, apiKey }) => {
         }
     };
 
+    const TabButton = ({ id, label, icon: Icon, colorClass }) => (
+        <button 
+            onClick={() => setActiveTab(id)}
+            className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === id 
+                ? `border-${colorClass}-500 text-${colorClass}-600 bg-${colorClass}-50/50` 
+                : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+            }`}
+        >
+            <Icon size={16} className={activeTab === id ? `text-${colorClass}-500` : ''} />
+            {label}
+            {inputs[id].length > 0 && (
+                <span className={`ml-1 w-2 h-2 rounded-full ${activeTab === id ? `bg-${colorClass}-400` : 'bg-slate-300'}`} />
+            )}
+        </button>
+    );
+
     return (
-        <div className="max-w-4xl mx-auto p-6">
+        <div className="max-w-6xl mx-auto p-6">
             <div className="mb-8">
                 <input 
                     value={deck.title} 
@@ -182,76 +238,96 @@ const Dashboard = ({ deck, onUpdateDeck, apiKey }) => {
                 />
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {/* Input Area */}
-                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 h-[600px] flex flex-col">
-                    <h3 className="font-semibold text-slate-700 mb-4 flex items-center gap-2">
-                        <FileText size={18} className="text-indigo-500"/> Lecture Notes / Context
-                    </h3>
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                {/* Input Area (Takes up more space now) */}
+                <div className="lg:col-span-8 bg-white rounded-xl shadow-sm border border-slate-200 h-[650px] flex flex-col overflow-hidden">
+                    <div className="flex border-b border-slate-200 bg-slate-50/50">
+                        <TabButton id="notes" label="Lecture Notes" icon={FileText} colorClass="indigo" />
+                        <TabButton id="transcript" label="Transcript" icon={Mic} colorClass="purple" />
+                        <TabButton id="slides" label="Slides Content" icon={Presentation} colorClass="pink" />
+                    </div>
+                    
                     <textarea 
-                        className="flex-1 w-full bg-slate-50 p-4 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-sm leading-relaxed"
-                        placeholder="Paste your lecture notes, slides text, or summary here..."
-                        value={inputText}
-                        onChange={(e) => setInputText(e.target.value)}
+                        className="flex-1 w-full p-6 resize-none focus:outline-none focus:bg-slate-50/30 text-sm leading-relaxed font-mono text-slate-700"
+                        placeholder={
+                            activeTab === 'notes' ? "Paste your own study notes or summaries here..." :
+                            activeTab === 'transcript' ? "Paste the full audio transcript of the lecture here..." :
+                            "Paste text content from your PowerPoint slides or PDFs here..."
+                        }
+                        value={inputs[activeTab]}
+                        onChange={(e) => handleInputChange(activeTab, e.target.value)}
                     ></textarea>
                     
-                    <div className="mt-4 pt-4 border-t border-slate-100 flex flex-col gap-3">
-                        <div className="flex gap-2 items-center justify-between text-sm text-slate-600">
+                    <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row gap-4 items-center justify-between">
+                        <div className="flex gap-4 text-sm text-slate-600">
                             <div className="flex items-center gap-2">
-                                <span>Generate:</span>
-                                <select value={genType} onChange={(e) => setGenType(e.target.value)} className="bg-slate-100 rounded px-2 py-1 border border-slate-200">
+                                <span className="font-medium">Generate:</span>
+                                <select value={genType} onChange={(e) => setGenType(e.target.value)} className="bg-white rounded-md px-3 py-1.5 border border-slate-300 focus:border-indigo-500 focus:outline-none">
                                     <option value="flashcards">Flashcards</option>
                                     <option value="mcq">Quiz (MCQ)</option>
                                 </select>
                             </div>
                             <div className="flex items-center gap-2">
-                                <span>Count:</span>
-                                <input type="number" min="1" max="20" value={count} onChange={(e) => setCount(e.target.value)} className="w-16 bg-slate-100 rounded px-2 py-1 border border-slate-200"/>
+                                <span className="font-medium">Count:</span>
+                                <input type="number" min="1" max="20" value={count} onChange={(e) => setCount(e.target.value)} className="w-16 bg-white rounded-md px-3 py-1.5 border border-slate-300 focus:border-indigo-500 focus:outline-none"/>
                             </div>
                         </div>
                         <button 
                             onClick={handleGenerate}
                             disabled={isGenerating}
-                            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 px-4 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+                            className="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 px-6 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed shadow-sm hover:shadow"
                         >
                             {isGenerating ? <RotateCw className="animate-spin" size={18}/> : <Sparkles size={18}/>}
-                            {isGenerating ? "Consulting AI..." : "Generate Content"}
+                            {isGenerating ? "Analyzing..." : "Generate Content"}
                         </button>
                     </div>
                 </div>
 
                 {/* Stats / Quick Actions */}
-                <div className="space-y-6">
+                <div className="lg:col-span-4 space-y-6">
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                        <h3 className="font-semibold text-slate-700 mb-4">Module Stats</h3>
+                        <h3 className="font-semibold text-slate-700 mb-4 flex items-center gap-2">
+                            <Brain size={18} className="text-slate-400"/> Module Stats
+                        </h3>
                         <div className="grid grid-cols-2 gap-4">
-                            <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-100">
-                                <div className="text-3xl font-bold text-indigo-600">{deck.cards?.length || 0}</div>
-                                <div className="text-sm text-indigo-400 font-medium">Flashcards</div>
+                            <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-100 flex flex-col items-center justify-center text-center">
+                                <div className="text-3xl font-bold text-indigo-600 mb-1">{deck.cards?.length || 0}</div>
+                                <div className="text-xs text-indigo-400 font-bold uppercase tracking-wider">Flashcards</div>
                             </div>
-                            <div className="bg-emerald-50 p-4 rounded-lg border border-emerald-100">
-                                <div className="text-3xl font-bold text-emerald-600">{deck.quiz?.length || 0}</div>
-                                <div className="text-sm text-emerald-400 font-medium">Quiz Questions</div>
+                            <div className="bg-emerald-50 p-4 rounded-lg border border-emerald-100 flex flex-col items-center justify-center text-center">
+                                <div className="text-3xl font-bold text-emerald-600 mb-1">{deck.quiz?.length || 0}</div>
+                                <div className="text-xs text-emerald-400 font-bold uppercase tracking-wider">Questions</div>
                             </div>
                         </div>
                     </div>
                     
                     <div className="space-y-3">
-                        <button onClick={() => onUpdateDeck({...deck, mode: 'flashcards'})} disabled={!deck.cards?.length} className="w-full bg-white border border-slate-200 hover:border-indigo-500 hover:shadow-md p-4 rounded-xl text-left transition disabled:opacity-50">
+                        <button onClick={() => onUpdateDeck({...deck, mode: 'flashcards'})} disabled={!deck.cards?.length} className="group w-full bg-white border border-slate-200 hover:border-indigo-500 hover:shadow-md p-4 rounded-xl text-left transition disabled:opacity-50">
                             <div className="flex items-center justify-between mb-1">
-                                <span className="font-bold text-slate-800">Study Flashcards</span>
-                                <BookOpen size={20} className="text-indigo-500"/>
+                                <span className="font-bold text-slate-800 group-hover:text-indigo-600 transition">Study Flashcards</span>
+                                <div className="p-2 bg-indigo-50 rounded-lg group-hover:bg-indigo-100 transition">
+                                    <BookOpen size={20} className="text-indigo-500"/>
+                                </div>
                             </div>
-                            <p className="text-sm text-slate-500">Review terms and concepts with active recall.</p>
+                            <p className="text-sm text-slate-500">Master concepts using the combined knowledge from your notes, slides, and transcripts.</p>
                         </button>
                         
-                        <button onClick={() => onUpdateDeck({...deck, mode: 'quiz'})} disabled={!deck.quiz?.length} className="w-full bg-white border border-slate-200 hover:border-emerald-500 hover:shadow-md p-4 rounded-xl text-left transition disabled:opacity-50">
+                        <button onClick={() => onUpdateDeck({...deck, mode: 'quiz'})} disabled={!deck.quiz?.length} className="group w-full bg-white border border-slate-200 hover:border-emerald-500 hover:shadow-md p-4 rounded-xl text-left transition disabled:opacity-50">
                             <div className="flex items-center justify-between mb-1">
-                                <span className="font-bold text-slate-800">Practice Quiz</span>
-                                <Brain size={20} className="text-emerald-500"/>
+                                <span className="font-bold text-slate-800 group-hover:text-emerald-600 transition">Practice Quiz</span>
+                                <div className="p-2 bg-emerald-50 rounded-lg group-hover:bg-emerald-100 transition">
+                                    <Brain size={20} className="text-emerald-500"/>
+                                </div>
                             </div>
-                            <p className="text-sm text-slate-500">Test your knowledge with AI-generated MCQs.</p>
+                            <p className="text-sm text-slate-500">Test your retention with AI-generated multiple choice questions.</p>
                         </button>
+                    </div>
+
+                    <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-800">
+                        <div className="font-bold flex items-center gap-2 mb-2">
+                            <Sparkles size={14} className="text-blue-500"/> Pro Tip:
+                        </div>
+                        Fill out all three tabs (Notes, Transcript, Slides) for the best results. The AI will synthesize information from all sources to create high-quality study materials.
                     </div>
                 </div>
             </div>
