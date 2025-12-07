@@ -5,8 +5,35 @@ import {
     RotateCw, CheckCircle, XCircle, Folder, ChevronDown,
     Mic, Presentation, BookOpenText, PieChart, AlertCircle,
     LayoutDashboard, Image as ImageIcon, X, FileType, LogOut, Lock, Mail, Edit3, Edit2,
-    Clock, Layers, Zap, Tag
+    Clock, Layers, Zap, Tag, Hash
 } from 'lucide-react';
+
+// --- FIREBASE IMPORTS ---
+import { initializeApp } from "firebase/app";
+import { 
+    getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, 
+    signOut, onAuthStateChanged 
+} from "firebase/auth";
+import { 
+    getFirestore, collection, addDoc, updateDoc, deleteDoc, 
+    doc, onSnapshot, query, orderBy, setDoc, getDoc, serverTimestamp 
+} from "firebase/firestore";
+
+// --- CONFIGURATION ---
+const firebaseConfig = {
+  apiKey: "AIzaSyCqowVnkUXzjgutGHRKKptEm5NjCl7C4yQ",
+  authDomain: "studygenie-691e5.firebaseapp.com",
+  projectId: "studygenie-691e5",
+  storageBucket: "studygenie-691e5.firebasestorage.app",
+  messagingSenderId: "524154104312",
+  appId: "1:524154104312:web:bc5f8b1d46ce9ee6e8ce0d",
+  measurementId: "G-BVLGXPV56E"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
 
 // --- UTILS ---
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -33,9 +60,6 @@ const getCardStatus = (card) => {
     const now = Date.now();
     if (card.nextReview <= now) return { label: 'Due', color: 'bg-orange-100 text-orange-700 border-orange-200' };
     
-    // If interval was > 3 days, consider it "Mastered" / Review
-    // We can infer interval roughly by checking how far in future nextReview is, 
-    // but storing 'lastInterval' is better. For now, simple heuristic:
     const oneDay = 24 * 60 * 60 * 1000;
     if (card.nextReview > now + (3 * oneDay)) return { label: 'Mastered', color: 'bg-emerald-100 text-emerald-700 border-emerald-200' };
     
@@ -447,7 +471,6 @@ const NameModal = ({ isOpen, type, initialValue, onClose, onSave }) => {
 const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
     const [isGenerating, setIsGenerating] = useState(false);
     const [statusMessage, setStatusMessage] = useState("");
-    const [genType, setGenType] = useState("flashcards");
     const [count, setCount] = useState(10);
     const [activeTab, setActiveTab] = useState('notes');
     const fileInputRef = useRef(null);
@@ -504,7 +527,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
         onUpdateDeck({ ...deck, studyMode: mode });
     };
 
-    const handleGenerate = async () => {
+    const handleGenerate = async (type) => {
         const hasText = inputs.notes.trim() || inputs.transcript.trim() || inputs.slides.trim();
         const hasAttachment = !!attachment;
         if (!hasText && !hasAttachment) return alert("Please add text or a file.");
@@ -526,7 +549,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
             let accumulatedResults = [];
 
             // OVERLAP PREVENTION
-            const existingItems = genType === "flashcards" ? (deck.cards || []) : (deck.quiz || []);
+            const existingItems = type === "flashcards" ? (deck.cards || []) : (deck.quiz || []);
             const existingSample = existingItems.slice(-30).map(item => item.q.substring(0, 30)).join(" | ");
 
             for (let i = 0; i < totalBatches; i++) {
@@ -541,7 +564,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
                 
                 const avoidInstruction = exclusionList.length > 5 ? ` CRITICAL: Do NOT generate questions similar to these: [${exclusionList.substring(0, 500)}...]` : "";
 
-                let prompt = genType === "flashcards" 
+                let prompt = type === "flashcards" 
                     ? `Generate ${currentBatchCount} flashcards (JSON: [{"q":..., "a":...}]).${avoidInstruction}`
                     : `Generate ${currentBatchCount} MCQs (JSON: [{"q":..., "options":..., "a":..., "exp":...}]).${avoidInstruction}`;
 
@@ -556,7 +579,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
             
             setStatusMessage("Saving...");
             const updatedDeck = { ...deck, ...currentInputs }; 
-            if (genType === "flashcards") updatedDeck.cards = [...(deck.cards || []), ...accumulatedResults];
+            if (type === "flashcards") updatedDeck.cards = [...(deck.cards || []), ...accumulatedResults];
             else updatedDeck.quiz = [...(deck.quiz || []), ...accumulatedResults];
             onUpdateDeck(updatedDeck);
 
@@ -591,6 +614,8 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
                             </div>
                         )}
                     </div>
+                    
+                    {/* UPDATED CONTROL BAR */}
                     <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row gap-4 items-center justify-between">
                         <div className="flex gap-4 text-sm text-slate-600 items-center">
                             <div className="relative">
@@ -601,22 +626,42 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
                             </div>
                             <div className="h-6 w-px bg-slate-300 mx-2 hidden sm:block"></div>
                             <div className="flex items-center gap-2">
-                                <span className="font-medium">Gen:</span>
-                                <select value={genType} onChange={(e) => setGenType(e.target.value)} className="bg-white rounded-md px-3 py-1.5 border border-slate-300 focus:outline-none">
-                                    <option value="flashcards">Cards</option>
-                                    <option value="mcq">Quiz</option>
-                                </select>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <span className="font-medium">Count:</span>
-                                <input type="number" min="1" max="50" value={count} onChange={(e) => setCount(e.target.value)} className="w-16 bg-white rounded-md px-3 py-1.5 border border-slate-300 focus:outline-none"/>
+                                <span className="font-medium text-slate-500">Count:</span>
+                                <div className="relative flex items-center">
+                                    <Hash size={14} className="absolute left-2.5 text-slate-400 pointer-events-none"/>
+                                    <input 
+                                        type="number" 
+                                        min="1" 
+                                        max="50" 
+                                        value={count} 
+                                        onChange={(e) => setCount(Number(e.target.value))} 
+                                        className="w-20 pl-8 pr-2 py-1.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none text-slate-700 font-medium"
+                                    />
+                                </div>
                             </div>
                         </div>
-                        <button onClick={handleGenerate} disabled={isGenerating} className="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 px-6 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 shadow-sm">
-                            {isGenerating ? <RotateCw className="animate-spin" size={18}/> : <Sparkles size={18}/>} {isGenerating ? statusMessage : "Generate"}
-                        </button>
+
+                        <div className="flex gap-3 w-full sm:w-auto">
+                            <button 
+                                onClick={() => handleGenerate('flashcards')} 
+                                disabled={isGenerating} 
+                                className="flex-1 sm:flex-none bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 shadow-sm text-sm"
+                            >
+                                {isGenerating ? <RotateCw className="animate-spin" size={16}/> : <Sparkles size={16}/>} 
+                                {isGenerating ? statusMessage : "Flashcards"}
+                            </button>
+                            <button 
+                                onClick={() => handleGenerate('mcq')} 
+                                disabled={isGenerating} 
+                                className="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 shadow-sm text-sm"
+                            >
+                                {isGenerating ? <RotateCw className="animate-spin" size={16}/> : <Brain size={16}/>} 
+                                {isGenerating ? statusMessage : "Quiz"}
+                            </button>
+                        </div>
                     </div>
                 </div>
+                
                 {/* Stats block */}
                 <div className="lg:col-span-4 space-y-6">
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
@@ -947,7 +992,7 @@ export default function App() {
     };
 
     const deleteFolder = (id) => { if(confirm("Delete folder?")) { setDecks(decks.filter(d => d.folderId !== id)); setFolders(folders.filter(f => f.id !== id)); setActiveId(null); }};
-    const addDeck = (fid) => { const nid = Date.now(); setDecks([...decks, { id: nid, folderId: fid, title: 'New Module', content: '', notes: '', transcript: '', slides: '', cards: [], quiz: [], mode: 'dashboard' }]); setViewMode('deck'); setActiveId(nid); };
+    const addDeck = (fid) => { const nid = Date.now(); setDecks([...decks, { id: nid, folderId: fid, title: 'New Module', mode: 'dashboard' }]); setViewMode('deck'); setActiveId(nid); };
     const deleteDeck = (id) => { if(confirm("Delete module?")) { const rem = decks.filter(d => d.id !== id); setDecks(rem); if(activeId === id) setActiveId(rem[0]?.id || null); }};
 
     return (
