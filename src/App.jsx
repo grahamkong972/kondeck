@@ -50,17 +50,11 @@ const generateContent = async (apiKey, prompt, context) => {
         return JSON.parse(cleanText);
     } catch (e) {
         // ERROR FIX 2: RECOVERY MECHANISM FOR TRUNCATED JSON
-        // This handles cases where the AI hits a token limit and cuts off the response.
         try {
-            // If it looks like an array start but has no end...
             if (cleanText.trim().startsWith('[') && !cleanText.trim().endsWith(']')) {
                 console.warn("JSON was truncated. Attempting to repair...");
-                
-                // Find the last closing brace '}' which signifies the end of the last complete object
                 const lastObjectEnd = cleanText.lastIndexOf('}');
-                
                 if (lastObjectEnd !== -1) {
-                    // Cut off the garbage after the last '}' and manually close the array
                     const fixedText = cleanText.substring(0, lastObjectEnd + 1) + ']';
                     return JSON.parse(fixedText);
                 }
@@ -68,10 +62,8 @@ const generateContent = async (apiKey, prompt, context) => {
         } catch (recoveryError) {
             console.error("JSON Recovery Failed:", recoveryError);
         }
-
         console.error("JSON Parsing Failed:", e);
-        console.log("Raw Text:", text); 
-        throw new Error("The AI response was too long or malformed. Try generating fewer questions (e.g., 10-15) at a time.");
+        throw new Error("The AI response was too long or malformed. Try generating fewer questions.");
     }
 };
 
@@ -171,8 +163,9 @@ const Sidebar = ({ folders, decks, activeDeckId, onSelectDeck, onAddFolder, onDe
 // 2. Input & Dashboard
 const Dashboard = ({ deck, onUpdateDeck, apiKey }) => {
     const [isGenerating, setIsGenerating] = useState(false);
+    const [statusMessage, setStatusMessage] = useState(""); // New state for progress text
     const [genType, setGenType] = useState("flashcards");
-    const [count, setCount] = useState(10); // Changed default to 10
+    const [count, setCount] = useState(10);
     const [activeTab, setActiveTab] = useState('notes');
     
     // State for the three input types, initializing from deck or falling back to 'content'
@@ -194,7 +187,6 @@ const Dashboard = ({ deck, onUpdateDeck, apiKey }) => {
     const handleInputChange = (field, value) => {
         const newInputs = { ...inputs, [field]: value };
         setInputs(newInputs);
-        // Save to deck immediately (could debounce for performance in large apps)
         onUpdateDeck({ ...deck, ...newInputs });
     };
 
@@ -206,6 +198,8 @@ const Dashboard = ({ deck, onUpdateDeck, apiKey }) => {
         if (!apiKey) return alert("Please enter your API Key in Settings.");
 
         setIsGenerating(true);
+        setStatusMessage("Analyzing context...");
+
         try {
             // Construct a comprehensive context from all inputs
             const combinedContext = `
@@ -219,20 +213,41 @@ const Dashboard = ({ deck, onUpdateDeck, apiKey }) => {
                 ${inputs.slides}
             `;
 
-            let prompt = "";
-            if (genType === "flashcards") {
-                prompt = `Generate ${count} difficult flashcards from the provided context. Focus on key concepts, definitions, and relationships found across the notes, transcript, and slides.`;
-            } else {
-                prompt = `Generate ${count} multiple choice questions with 4 options each from the provided context. Ensure the questions test deep understanding.`;
-            }
+            // BATCHING LOGIC
+            const BATCH_SIZE = 5; // Safe number to prevent timeouts/cut-offs
+            const totalBatches = Math.ceil(count / BATCH_SIZE);
+            let accumulatedResults = [];
 
-            const result = await generateContent(apiKey, prompt, combinedContext);
+            for (let i = 0; i < totalBatches; i++) {
+                setStatusMessage(`Generating batch ${i + 1} of ${totalBatches}...`);
+                
+                // Calculate items for this batch
+                const itemsRemaining = count - accumulatedResults.length;
+                const currentBatchCount = Math.min(BATCH_SIZE, itemsRemaining);
+
+                let prompt = "";
+                // Add instruction to avoid repeats if we have previous results
+                const avoidInstruction = accumulatedResults.length > 0 
+                    ? ` IMPORTANT: Do not duplicate these concepts: ${accumulatedResults.slice(-5).map(item => item.q).join(", ")}.` 
+                    : "";
+
+                if (genType === "flashcards") {
+                    prompt = `Generate ${currentBatchCount} difficult flashcards from the provided context. Focus on key concepts, definitions, and relationships found across the notes, transcript, and slides.${avoidInstruction}`;
+                } else {
+                    prompt = `Generate ${currentBatchCount} multiple choice questions with 4 options each from the provided context. Ensure the questions test deep understanding.${avoidInstruction}`;
+                }
+
+                // Call AI
+                const batchResult = await generateContent(apiKey, prompt, combinedContext);
+                accumulatedResults = [...accumulatedResults, ...batchResult];
+            }
             
-            const updatedDeck = { ...deck, ...inputs }; // Ensure current text is saved
+            setStatusMessage("Finalizing...");
+            const updatedDeck = { ...deck, ...inputs }; 
             if (genType === "flashcards") {
-                updatedDeck.cards = [...(deck.cards || []), ...result];
+                updatedDeck.cards = [...(deck.cards || []), ...accumulatedResults];
             } else {
-                updatedDeck.quiz = [...(deck.quiz || []), ...result];
+                updatedDeck.quiz = [...(deck.quiz || []), ...accumulatedResults];
             }
             
             onUpdateDeck(updatedDeck);
@@ -240,6 +255,7 @@ const Dashboard = ({ deck, onUpdateDeck, apiKey }) => {
             alert(error.message);
         } finally {
             setIsGenerating(false);
+            setStatusMessage("");
         }
     };
 
@@ -311,7 +327,7 @@ const Dashboard = ({ deck, onUpdateDeck, apiKey }) => {
                             className="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 px-6 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed shadow-sm hover:shadow"
                         >
                             {isGenerating ? <RotateCw className="animate-spin" size={18}/> : <Sparkles size={18}/>}
-                            {isGenerating ? "Analyzing..." : "Generate Content"}
+                            {isGenerating ? statusMessage : "Generate Content"}
                         </button>
                     </div>
                 </div>
