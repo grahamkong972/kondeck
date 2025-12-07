@@ -836,7 +836,7 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 flex-1 min-h-0">
                 <div className="lg:col-span-8 flex flex-col gap-4 h-full">
-                     {/* Syllabus Analysis Panel */}
+                     {/* Syllabus Analysis Panel (Same as before) ... */}
                      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex-1 flex flex-col">
                         <div className="flex items-center justify-between mb-4">
                             <h3 className="font-bold text-slate-700 flex items-center gap-2"><BookOpenText size={20} className="text-emerald-500"/> Course Syllabus</h3>
@@ -851,7 +851,7 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }
                     </div>
                 </div>
                 <div className="lg:col-span-4 space-y-6 overflow-y-auto">
-                    {/* Content Audit Panel */}
+                    {/* Content Audit Panel ... */}
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                         <h3 className="font-semibold text-slate-700 mb-4 flex items-center gap-2"><CheckCircle size={18} className="text-indigo-500"/> Content Audit</h3>
                         {folder.coverage ? (
@@ -1020,6 +1020,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
 
                 try {
                     const batchResult = await generateContent(apiKey, prompt, combinedContext, systemInstruction, attachmentPayload, currentBatchCount);
+                    // Safe handling for result + data validation
                     const safeResult = Array.isArray(batchResult) ? batchResult : (batchResult ? [batchResult] : []);
                     const validatedResult = validateAndFixData(safeResult, type === 'exam' ? 'mcq' : type);
                     
@@ -1295,6 +1296,8 @@ export default function App() {
     const [viewMode, setViewMode] = useState('deck'); 
     const [activeId, setActiveId] = useState(decks[0]?.id || null);
     const [showSettings, setShowSettings] = useState(false);
+    
+    // Name Modal State
     const [nameModal, setNameModal] = useState({ isOpen: false, type: '', folder: null, value: '' });
 
     useEffect(() => {
@@ -1309,16 +1312,23 @@ export default function App() {
 
     const updateDeck = (d) => setDecks(decks.map(x => x.id === d.id ? d : x));
     const updateFolder = (f) => setFolders(folders.map(x => x.id === f.id ? f : x));
-    const addFolder = () => setNameModal({ isOpen: true, type: 'create', folder: null, value: '' });
+    
+    // New Folder / Rename Logic
+    const openAddFolder = () => setNameModal({ isOpen: true, type: 'create', folder: null, value: '' });
+    const openRenameFolder = (folder) => setNameModal({ isOpen: true, type: 'rename', folder: folder, value: folder.name });
+
+    const handleSaveName = (name) => {
+        if (nameModal.type === 'create') {
+            setFolders([...folders, { id: Date.now(), name }]);
+        } else {
+            setFolders(folders.map(f => f.id === nameModal.folder.id ? { ...f, name } : f));
+        }
+        setNameModal({ isOpen: false, type: '', folder: null, value: '' });
+    };
+
     const deleteFolder = (id) => { if(confirm("Delete folder?")) { setDecks(decks.filter(d => d.folderId !== id)); setFolders(folders.filter(f => f.id !== id)); setActiveId(null); }};
     const addDeck = (fid) => { const nid = Date.now(); setDecks([...decks, { id: nid, folderId: fid, title: 'New Module', mode: 'dashboard' }]); setViewMode('deck'); setActiveId(nid); };
     const deleteDeck = (id) => { if(confirm("Delete module?")) { const rem = decks.filter(d => d.id !== id); setDecks(rem); if(activeId === id) setActiveId(rem[0]?.id || null); }};
-    const openRenameFolder = (folder) => setNameModal({ isOpen: true, type: 'rename', folder: folder, value: folder.name });
-    const handleSaveName = (name) => {
-        if (nameModal.type === 'create') setFolders([...folders, { id: Date.now(), name }]);
-        else setFolders(folders.map(f => f.id === nameModal.folder.id ? { ...f, name } : f));
-        setNameModal({ isOpen: false, type: '', folder: null, value: '' });
-    };
 
     return (
         <div className="flex h-screen bg-[#f8fafc] font-sans text-slate-900">
@@ -1332,7 +1342,7 @@ export default function App() {
                 onSettings={() => setShowSettings(true)}
             />
             <main className="flex-1 overflow-y-auto custom-scroll relative bg-[#f8fafc]">
-                {viewMode === 'folder' && activeFolder && <FolderDashboard folder={activeFolder} decks={decks.filter(d => d.folderId === activeFolder.id)} onUpdateFolder={updateFolder} onUpdateDeck={updateDeck} apiKey={apiKey} />}
+                {viewMode === 'folder' && activeFolder && <FolderDashboard folder={activeFolder} decks={decks.filter(d => d.folderId === activeFolder.id)} onUpdateFolder={updateFolder} apiKey={apiKey} />}
                 {viewMode === 'deck' && activeDeck && (
                     <>
                         {activeDeck.mode === 'dashboard' && <ModuleDashboard deck={activeDeck} onUpdateDeck={updateDeck} apiKey={apiKey} userProfile={userProfile} />}
@@ -1343,9 +1353,19 @@ export default function App() {
                         {activeDeck.mode === 'saq' && <SAQMode questions={activeDeck.saqs || []} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} apiKey={apiKey} />}
                     </>
                 )}
+
                 {!activeDeck && !activeFolder && <div className="flex h-full items-center justify-center text-slate-400"><BookOpen size={48} className="opacity-50"/></div>}
             </main>
-            <NameModal isOpen={nameModal.isOpen} type={nameModal.type} initialValue={nameModal.value} onClose={() => setNameModal({ ...nameModal, isOpen: false })} onSave={handleSaveName} />
+
+            {/* Name Input Modal */}
+            <NameModal 
+                isOpen={nameModal.isOpen}
+                type={nameModal.type}
+                initialValue={nameModal.value}
+                onClose={() => setNameModal({ ...nameModal, isOpen: false })}
+                onSave={handleSaveName}
+            />
+
             {showSettings && (
                 <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
                     <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md">
