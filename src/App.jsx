@@ -20,14 +20,14 @@ import {
 
 // --- CONFIGURATION (REPLACE WITH YOUR KEYS) ---
 const firebaseConfig = {
-  apiKey: "YOUR_FIREBASE_API_KEY",
-  authDomain: "YOUR_PROJECT.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyCqowVnkUXzjgutGHRKKptEm5NjCl7C4yQ",
+  authDomain: "studygenie-691e5.firebaseapp.com",
+  projectId: "studygenie-691e5",
+  storageBucket: "studygenie-691e5.firebasestorage.app",
+  messagingSenderId: "524154104312",
+  appId: "1:524154104312:web:bc5f8b1d46ce9ee6e8ce0d",
+  measurementId: "G-BVLGXPV56E"
 };
-
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
