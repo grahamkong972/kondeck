@@ -1,22 +1,39 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
     BookOpen, Brain, ChevronLeft, ChevronRight, Settings, 
     Plus, Trash2, GraduationCap, FileText, Sparkles, 
     RotateCw, CheckCircle, XCircle, Folder, ChevronDown,
     Mic, Presentation, BookOpenText, PieChart, AlertCircle,
-    LayoutDashboard
+    LayoutDashboard, Image as ImageIcon, X, FileType
 } from 'lucide-react';
 
 // --- UTILS ---
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
+const fileToBase64 = (file) => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => {
+            // Remove the "data:mime/type;base64," prefix for the API
+            const base64String = reader.result.split(',')[1]; 
+            resolve({
+                inlineData: {
+                    data: base64String,
+                    mimeType: file.type
+                }
+            });
+        };
+        reader.onerror = (error) => reject(error);
+    });
+};
+
 // --- GEMINI AI SERVICE ---
-const generateContent = async (apiKey, prompt, context, systemInstruction) => {
+const generateContent = async (apiKey, prompt, context, systemInstruction, attachmentData = null) => {
     if (!apiKey) throw new Error("API Key is missing. Please add it in Settings.");
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
     
-    // Construct a rich system prompt based on user profile
     const fullSystemPrompt = `
         You are StudyGenie, an advanced AI tutor.
         ${systemInstruction || ''}
@@ -27,13 +44,13 @@ const generateContent = async (apiKey, prompt, context, systemInstruction) => {
         3. Double-escape all backslashes in LaTeX (e.g. \\\\alpha).
     `;
 
-    const fullUserPrompt = `
-        CONTEXT:
-        ${context}
-        
-        TASK:
-        ${prompt}
-    `;
+    const contentsPart = [{ text: `CONTEXT:\n${context}\n\nTASK:\n${prompt}` }];
+    
+    // If a file (image or PDF) is provided, add it to the payload
+    if (attachmentData) {
+        contentsPart.push(attachmentData); 
+        contentsPart[0].text += "\n\n[DOCUMENT CONTEXT]: Analyze the attached image or PDF document carefully. It contains lecture slides or diagrams essential to the topic.";
+    }
 
     // RETRY LOGIC
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -42,7 +59,7 @@ const generateContent = async (apiKey, prompt, context, systemInstruction) => {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    contents: [{ parts: [{ text: fullUserPrompt }] }],
+                    contents: [{ parts: contentsPart }],
                     system_instruction: { parts: [{ text: fullSystemPrompt }] }
                 })
             });
@@ -75,7 +92,6 @@ const generateContent = async (apiKey, prompt, context, systemInstruction) => {
                         return JSON.parse(fixedText);
                     }
                 }
-                // Try to close unclosed JSON objects
                 if (cleanText.trim().startsWith('{') && !cleanText.trim().endsWith('}')) {
                      const lastQuote = cleanText.lastIndexOf('"');
                      if (lastQuote !== -1) {
@@ -362,6 +378,8 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
     const [genType, setGenType] = useState("flashcards");
     const [count, setCount] = useState(10);
     const [activeTab, setActiveTab] = useState('notes');
+    const fileInputRef = useRef(null);
+    const [attachment, setAttachment] = useState(null); // Changed from previewImage
     
     const [inputs, setInputs] = useState({
         notes: deck.notes || deck.content || "",
@@ -375,6 +393,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
             transcript: deck.transcript || "",
             slides: deck.slides || ""
         });
+        setAttachment(null); 
     }, [deck.id]);
 
     const handleInputChange = (field, value) => {
@@ -389,8 +408,33 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
         if (confirm(`Delete all ${type}?`)) onUpdateDeck({ ...deck, [key]: [] });
     };
 
+    const handleFileUpload = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        // Simple size check (10MB limit)
+        if (file.size > 10 * 1024 * 1024) {
+            alert("File is too large! Please upload files under 10MB.");
+            return;
+        }
+
+        const isImage = file.type.startsWith('image/');
+        const isPDF = file.type === 'application/pdf';
+
+        if (isImage) {
+            const reader = new FileReader();
+            reader.onload = (e) => setAttachment({ type: 'image', data: e.target.result, file });
+            reader.readAsDataURL(file);
+        } else if (isPDF) {
+            setAttachment({ type: 'pdf', name: file.name, file });
+        }
+    };
+
     const handleGenerate = async () => {
-        if (!inputs.notes.trim() && !inputs.transcript.trim() && !inputs.slides.trim()) return alert("Please enter content!");
+        const hasText = inputs.notes.trim() || inputs.transcript.trim() || inputs.slides.trim();
+        const hasAttachment = !!attachment;
+
+        if (!hasText && !hasAttachment) return alert("Please add text notes or upload a file (Image/PDF)!");
         if (!apiKey) return alert("API Key missing.");
 
         setIsGenerating(true);
@@ -402,11 +446,17 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
                 MODULE: ${deck.title}
                 NOTES: ${currentInputs.notes}
                 TRANSCRIPT: ${currentInputs.transcript}
-                SLIDES: ${currentInputs.slides}
+                SLIDES TEXT: ${currentInputs.slides}
             `;
 
             let systemInstruction = `Target audience: ${userProfile.age || 'University'} student`;
             if (userProfile.degree) systemInstruction += ` studying ${userProfile.degree}.`;
+
+            // Prepare Attachment Data if exists
+            let attachmentPayload = null;
+            if (attachment?.file) {
+                attachmentPayload = await fileToBase64(attachment.file);
+            }
 
             const BATCH_SIZE = 5; 
             const totalBatches = Math.ceil(count / BATCH_SIZE);
@@ -425,7 +475,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
                     : `Generate ${currentBatchCount} MCQs (JSON: [{"q":..., "options":..., "a":..., "exp":...}]).${avoidInstruction}`;
 
                 try {
-                    const batchResult = await generateContent(apiKey, prompt, combinedContext, systemInstruction);
+                    const batchResult = await generateContent(apiKey, prompt, combinedContext, systemInstruction, attachmentPayload);
                     accumulatedResults = [...accumulatedResults, ...batchResult];
                 } catch (batchError) {
                     console.error(batchError);
@@ -439,6 +489,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
             else updatedDeck.quiz = [...(deck.quiz || []), ...accumulatedResults];
             
             onUpdateDeck(updatedDeck);
+            // Don't clear attachment automatically so user can gen more questions from it
 
         } catch (error) {
             alert(error.message);
@@ -476,14 +527,57 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
                         <TabButton id="transcript" label="Transcript" icon={Mic} colorClass="purple" />
                         <TabButton id="slides" label="Slides" icon={Presentation} colorClass="pink" />
                     </div>
-                    <textarea 
-                        className="flex-1 w-full p-6 resize-none focus:outline-none focus:bg-slate-50/30 text-sm leading-relaxed font-mono text-slate-700"
-                        placeholder={`Paste your ${activeTab} content here...`}
-                        value={inputs[activeTab]}
-                        onChange={(e) => handleInputChange(activeTab, e.target.value)}
-                    ></textarea>
+                    
+                    <div className="flex-1 relative">
+                        <textarea 
+                            className="w-full h-full p-6 resize-none focus:outline-none focus:bg-slate-50/30 text-sm leading-relaxed font-mono text-slate-700"
+                            placeholder={`Paste your ${activeTab} content here...`}
+                            value={inputs[activeTab]}
+                            onChange={(e) => handleInputChange(activeTab, e.target.value)}
+                        ></textarea>
+                        
+                        {/* File Preview Overlay */}
+                        {attachment && (
+                            <div className="absolute bottom-4 right-4 w-32 h-32 bg-white p-2 shadow-lg rounded-lg border border-slate-200 group flex flex-col items-center justify-center text-center">
+                                {attachment.type === 'image' ? (
+                                    <img src={attachment.data} alt="Preview" className="w-full h-20 object-cover rounded mb-1"/>
+                                ) : (
+                                    <div className="w-full h-20 flex flex-col items-center justify-center bg-red-50 rounded mb-1 border border-red-100">
+                                        <FileType size={32} className="text-red-500 mb-1"/>
+                                        <span className="text-[10px] font-bold text-red-700 uppercase">PDF</span>
+                                    </div>
+                                )}
+                                <span className="text-[10px] text-slate-500 truncate w-full px-1">{attachment.type === 'pdf' ? attachment.name : 'Image'}</span>
+                                <button onClick={() => { setAttachment(null); fileInputRef.current.value = ""; }} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-md hover:scale-110 transition">
+                                    <X size={12}/>
+                                </button>
+                            </div>
+                        )}
+                    </div>
+
                     <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row gap-4 items-center justify-between">
-                        <div className="flex gap-4 text-sm text-slate-600">
+                        <div className="flex gap-4 text-sm text-slate-600 items-center">
+                            {/* File Upload Button */}
+                            <div className="relative">
+                                <input 
+                                    type="file" 
+                                    ref={fileInputRef}
+                                    onChange={handleFileUpload}
+                                    accept="image/*,application/pdf"
+                                    className="hidden" 
+                                />
+                                <button 
+                                    onClick={() => fileInputRef.current?.click()}
+                                    className={`p-2 rounded-lg border transition flex items-center gap-2 ${attachment ? 'bg-indigo-50 border-indigo-200 text-indigo-600' : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-100'}`}
+                                    title="Upload Slide Image or PDF"
+                                >
+                                    {attachment ? (attachment.type === 'pdf' ? <FileType size={18}/> : <ImageIcon size={18}/>) : <Plus size={18}/>}
+                                    {attachment ? (attachment.type === 'pdf' ? "PDF Added" : "Image Added") : "Add File"}
+                                </button>
+                            </div>
+
+                            <div className="h-6 w-px bg-slate-300 mx-2 hidden sm:block"></div>
+
                             <div className="flex items-center gap-2">
                                 <span className="font-medium">Generate:</span>
                                 <select value={genType} onChange={(e) => setGenType(e.target.value)} className="bg-white rounded-md px-3 py-1.5 border border-slate-300 focus:outline-none">
