@@ -28,7 +28,6 @@ const fileToBase64 = (file) => {
 };
 
 // --- TEXT RENDERER COMPONENT ---
-// Fixes formatting issues (newlines, bolding, LaTeX artifacts)
 const FormattedText = ({ text, className = "" }) => {
     if (!text) return null;
 
@@ -264,8 +263,8 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, apiKey }) => {
                                     <span className="text-sm text-slate-500 mb-1">Coverage Score</span>
                                 </div>
                                 <div className="w-full bg-slate-100 rounded-full h-2"><div className="bg-emerald-500 h-2 rounded-full transition-all duration-1000" style={{ width: `${folder.coverage.score}%` }}></div></div>
-                                <div className="p-3 bg-slate-50 rounded-lg text-sm text-slate-700 border border-slate-100">{folder.coverage.analysis}</div>
-                                {folder.coverage.missing && <div className="p-3 bg-red-50 rounded-lg text-sm text-red-700 border border-red-100"><div className="font-bold flex items-center gap-2 mb-1"><AlertCircle size={14}/> Missing:</div>{folder.coverage.missing}</div>}
+                                <div className="p-3 bg-slate-50 rounded-lg text-sm text-slate-700 border border-slate-100"><FormattedText text={folder.coverage.analysis}/></div>
+                                {folder.coverage.missing && <div className="p-3 bg-red-50 rounded-lg text-sm text-red-700 border border-red-100"><div className="font-bold flex items-center gap-2 mb-1"><AlertCircle size={14}/> Missing:</div><FormattedText text={folder.coverage.missing}/></div>}
                             </div>
                         ) : <div className="text-center text-slate-400 py-8 text-sm">Run analysis to check coverage.</div>}
                     </div>
@@ -462,6 +461,7 @@ const FlashcardStudy = ({ cards, onBack, apiKey }) => {
     const [idx, setIdx] = useState(0);
     const [flipped, setFlipped] = useState(false);
     const [aiHelp, setAiHelp] = useState(null);
+    const [loadingHelp, setLoadingHelp] = useState(false);
     const card = cards[idx];
 
     const next = useCallback(() => { setFlipped(false); setAiHelp(null); setIdx((prev) => (prev + 1) % cards.length); }, [cards.length]);
@@ -473,10 +473,15 @@ const FlashcardStudy = ({ cards, onBack, apiKey }) => {
     }, [next, prev]);
 
     const getHelp = async (type) => {
+        if (loadingHelp) return;
+        if (!apiKey) return alert("Need API Key");
+        
+        setLoadingHelp(true);
         try {
             const res = await generateContent(apiKey, `Provide a ${type} for: Q: ${card.q}, A: ${card.a}. Return JSON: {"text": "..."}`, "");
             setAiHelp(res.text);
         } catch(e) { alert("AI Error"); }
+        finally { setLoadingHelp(false); }
     };
 
     return (
@@ -494,8 +499,20 @@ const FlashcardStudy = ({ cards, onBack, apiKey }) => {
                         <div className="absolute w-full h-full bg-indigo-600 rounded-2xl backface-hidden flex flex-col items-center justify-center p-8 text-white" style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}>
                             <div className="text-xl font-medium text-center overflow-y-auto max-h-full custom-scroll"><FormattedText text={card.a}/></div>
                             <div className="absolute bottom-6 flex gap-2" onClick={e => e.stopPropagation()}>
-                                <button onClick={() => getHelp('simplify')} className="px-3 py-1 bg-white/20 rounded-full text-xs font-bold border border-white/10">Simplify</button>
-                                <button onClick={() => getHelp('mnemonic')} className="px-3 py-1 bg-white/20 rounded-full text-xs font-bold border border-white/10">Mnemonic</button>
+                                <button 
+                                    onClick={() => getHelp('simplify')} 
+                                    disabled={loadingHelp}
+                                    className="px-3 py-1 bg-white/20 hover:bg-white/30 disabled:opacity-50 disabled:cursor-wait rounded-full text-xs font-bold border border-white/10 flex items-center gap-1"
+                                >
+                                    {loadingHelp ? <RotateCw className="animate-spin" size={12}/> : null} Simplify
+                                </button>
+                                <button 
+                                    onClick={() => getHelp('mnemonic')} 
+                                    disabled={loadingHelp}
+                                    className="px-3 py-1 bg-white/20 hover:bg-white/30 disabled:opacity-50 disabled:cursor-wait rounded-full text-xs font-bold border border-white/10 flex items-center gap-1"
+                                >
+                                    {loadingHelp ? <RotateCw className="animate-spin" size={12}/> : null} Mnemonic
+                                </button>
                             </div>
                         </div>
                     </div>
