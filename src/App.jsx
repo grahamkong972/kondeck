@@ -20,13 +20,12 @@ import {
 
 // --- CONFIGURATION (REPLACE WITH YOUR KEYS) ---
 const firebaseConfig = {
-  apiKey: "AIzaSyCqowVnkUXzjgutGHRKKptEm5NjCl7C4yQ",
-  authDomain: "studygenie-691e5.firebaseapp.com",
-  projectId: "studygenie-691e5",
-  storageBucket: "studygenie-691e5.firebasestorage.app",
-  messagingSenderId: "524154104312",
-  appId: "1:524154104312:web:bc5f8b1d46ce9ee6e8ce0d",
-  measurementId: "G-BVLGXPV56E"
+  apiKey: "YOUR_FIREBASE_API_KEY",
+  authDomain: "YOUR_PROJECT.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_PROJECT.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
 };
 
 // Initialize Firebase
@@ -109,62 +108,116 @@ const FormattedText = ({ text, className = "" }) => {
     );
 };
 
-// --- BACKEND SERVICE (THE GATEKEEPER CLIENT) ---
+// --- GEMINI AI SERVICE (HYBRID) ---
+// Tries Server (Gatekeeper) first, falls back to Client Key if running locally/server fails
 const generateContent = async (apiKey, prompt, context, systemInstruction, attachmentData = null, quantity = 1) => {
     const user = auth.currentUser;
-    if (!user) throw new Error("You must be logged in to generate content.");
+    
+    // Helper to cleanup and parse response
+    const parseResponse = (text) => {
+        let cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
+        cleanText = cleanText.replace(/\\(?!["\\/bfnrtu])/g, "\\\\");
+        try {
+            return JSON.parse(cleanText);
+        } catch (e) {
+            // Recovery for truncated JSON
+            if (cleanText.trim().startsWith('[') && !cleanText.trim().endsWith(']')) {
+                const lastObjectEnd = cleanText.lastIndexOf('}');
+                if (lastObjectEnd !== -1) return JSON.parse(cleanText.substring(0, lastObjectEnd + 1) + ']');
+            }
+            if (cleanText.trim().startsWith('{') && !cleanText.trim().endsWith('}')) {
+                 const lastQuote = cleanText.lastIndexOf('"');
+                 if (lastQuote !== -1) return JSON.parse(cleanText.substring(0, lastQuote + 1) + '"}'); 
+            }
+            throw e;
+        }
+    };
 
-    // Check if user has "Pro" status (fetch from profile or claim)
-    // For MVP, we assume false unless specific logic sets it
-    const isPro = false; 
+    // 1. ATTEMPT SERVER-SIDE (GATEKEEPER)
+    if (user) {
+        try {
+            // Note: We skip sending large images to serverless functions to avoid 4MB payload limits
+            // If attachment exists, we might want to skip directly to fallback unless we upload to storage first.
+            if (!attachmentData) {
+                const response = await fetch('/api/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        prompt, context, systemInstruction, 
+                        userId: user.uid, isPro: false, quantity 
+                    })
+                });
 
-    const response = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            prompt,
-            context,
-            systemInstruction,
-            userId: user.uid,
-            isPro: isPro,
-            quantity: quantity // Send exact count for usage tracking
-            // Note: Attachment handling via serverless usually requires upload URL strategies.
-            // For simplicity in this step, we are focusing on text logic. 
-            // To support images with this architecture, you'd upload to Firebase Storage first 
-            // and pass the URL, or increase Vercel payload limits.
-        })
-    });
+                if (response.status === 402) {
+                    const data = await response.json();
+                    throw new Error(`DAILY_LIMIT_REACHED`);
+                }
 
-    if (response.status === 402) {
-        const data = await response.json();
-        throw new Error(`DAILY_LIMIT_REACHED`);
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.text) return parseResponse(data.text);
+                }
+                // If 404 or 500, throw to trigger catch block -> fallback
+                throw new Error("Server unreachable");
+            }
+        } catch (e) {
+            // If strictly limit reached, stop here.
+            if (e.message.includes("DAILY_LIMIT_REACHED")) throw e;
+            console.warn("Backend generation failed (likely running locally), switching to direct API call.", e);
+        }
     }
 
-    if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.error || "Generation failed");
+    // 2. FALLBACK: DIRECT CLIENT-SIDE CALL (For Localhost / Dev)
+    if (!apiKey) throw new Error("Backend unavailable and no API Key in settings. Please add your API Key.");
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+    
+    const fullSystemPrompt = `
+        You are StudyGenie, an advanced AI tutor.
+        ${systemInstruction || ''}
+        CRITICAL OUTPUT RULES:
+        1. Return ONLY valid JSON.
+        2. Do NOT use markdown code blocks.
+        3. Double-escape all backslashes in LaTeX (e.g. \\\\alpha).
+        4. Use HTML <br/> for line breaks.
+        5. Use MARKDOWN for text formatting (e.g. **bold**).
+        6. Use LaTeX ($...$) ONLY for mathematical formulas.
+    `;
+
+    const contentsPart = [{ text: `CONTEXT:\n${context}\n\nTASK:\n${prompt}` }];
+    if (attachmentData) {
+        contentsPart.push(attachmentData); 
+        contentsPart[0].text += "\n\n[DOCUMENT CONTEXT]: Analyze the attached image or PDF document carefully.";
     }
 
-    const data = await response.json();
-    const text = data.text;
+    for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ parts: contentsPart }],
+                    system_instruction: { parts: [{ text: fullSystemPrompt }] }
+                })
+            });
 
-    if (!text) throw new Error("No content generated.");
+            if (response.status === 429) {
+                // If local rate limit hit
+                throw new Error("Local Rate Limit Exceeded. Slow down.");
+            }
 
-    let cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
-    cleanText = cleanText.replace(/\\(?!["\\/bfnrtu])/g, "\\\\");
+            if (!response.ok) throw new Error(`Direct API Error: ${response.statusText}`);
+            
+            const data = await response.json();
+            const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (!text) throw new Error("No content generated.");
 
-    try {
-        return JSON.parse(cleanText);
-    } catch (e) {
-        if (cleanText.trim().startsWith('[') && !cleanText.trim().endsWith(']')) {
-            const lastObjectEnd = cleanText.lastIndexOf('}');
-            if (lastObjectEnd !== -1) return JSON.parse(cleanText.substring(0, lastObjectEnd + 1) + ']');
+            return parseResponse(text);
+
+        } catch (error) {
+            if (attempt === 2) throw error; 
+            await sleep(2000 * (attempt + 1)); 
         }
-        if (cleanText.trim().startsWith('{') && !cleanText.trim().endsWith('}')) {
-             const lastQuote = cleanText.lastIndexOf('"');
-             if (lastQuote !== -1) return JSON.parse(cleanText.substring(0, lastQuote + 1) + '"}'); 
-        }
-        throw e; 
     }
 };
 
@@ -602,7 +655,110 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
     );
 };
 
-// ... FlashcardStudy and QuizMode reused from previous response ...
+const FlashcardStudy = ({ cards, onBack, apiKey }) => {
+    const [idx, setIdx] = useState(0);
+    const [flipped, setFlipped] = useState(false);
+    const [aiHelp, setAiHelp] = useState(null);
+    const [loadingHelp, setLoadingHelp] = useState(false);
+    const card = cards[idx];
+
+    const next = useCallback(() => { setFlipped(false); setAiHelp(null); setIdx((prev) => (prev + 1) % cards.length); }, [cards.length]);
+    const prev = useCallback(() => { setFlipped(false); setAiHelp(null); setIdx((prev) => (prev - 1 + cards.length) % cards.length); }, [cards.length]);
+
+    useEffect(() => {
+        const h = (e) => { if (e.code === 'Space') { e.preventDefault(); setFlipped(p=>!p); } else if (e.code === 'ArrowRight') next(); else if (e.code === 'ArrowLeft') prev(); };
+        window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h);
+    }, [next, prev]);
+
+    const getHelp = async (type) => {
+        if (loadingHelp) return;
+        
+        setLoadingHelp(true);
+        try {
+            const res = await generateContent(apiKey, `Provide a ${type} for: Q: ${card.q}, A: ${card.a}. Return JSON: {"text": "..."}`, "");
+            setAiHelp(res.text);
+        } catch(e) { alert("AI Error"); }
+        finally { setLoadingHelp(false); }
+    };
+
+    return (
+        <div className="h-full flex flex-col p-6 max-w-4xl mx-auto w-full">
+            <button onClick={onBack} className="self-start mb-4 flex gap-2 text-slate-500 hover:text-indigo-600 font-medium"><ChevronLeft/> Back</button>
+            <div className="flex-1 flex flex-col items-center justify-center relative perspective-1000">
+                <button onClick={prev} className="absolute left-0 p-3 bg-white rounded-full shadow hover:scale-110 transition z-10"><ChevronLeft/></button>
+                <button onClick={next} className="absolute right-0 p-3 bg-white rounded-full shadow hover:scale-110 transition z-10"><ChevronRight/></button>
+                <div className="w-full max-w-2xl h-96 relative cursor-pointer" onClick={() => setFlipped(!flipped)}>
+                    <div className="w-full h-full relative shadow-2xl rounded-2xl" style={{ transformStyle: 'preserve-3d', transition: 'transform 0.6s', transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)' }}>
+                        <div className="absolute w-full h-full bg-white rounded-2xl backface-hidden flex flex-col items-center justify-center p-8 border" style={{ backfaceVisibility: 'hidden' }}>
+                            <div className="text-2xl font-medium text-center"><FormattedText text={card.q}/></div>
+                            <div className="absolute bottom-6 text-slate-400 text-sm animate-pulse">Click to Flip</div>
+                        </div>
+                        <div className="absolute w-full h-full bg-indigo-600 rounded-2xl backface-hidden flex flex-col items-center justify-center p-8 text-white" style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}>
+                            <div className="text-xl font-medium text-center overflow-y-auto max-h-full custom-scroll"><FormattedText text={card.a}/></div>
+                            <div className="absolute bottom-6 flex gap-2" onClick={e => e.stopPropagation()}>
+                                <button 
+                                    onClick={() => getHelp('simplify')} 
+                                    disabled={loadingHelp}
+                                    className="px-3 py-1 bg-white/20 hover:bg-white/30 disabled:opacity-50 disabled:cursor-wait rounded-full text-xs font-bold border border-white/10 flex items-center gap-1"
+                                >
+                                    {loadingHelp ? <RotateCw className="animate-spin" size={12}/> : null} Simplify
+                                </button>
+                                <button 
+                                    onClick={() => getHelp('mnemonic')} 
+                                    disabled={loadingHelp}
+                                    className="px-3 py-1 bg-white/20 hover:bg-white/30 disabled:opacity-50 disabled:cursor-wait rounded-full text-xs font-bold border border-white/10 flex items-center gap-1"
+                                >
+                                    {loadingHelp ? <RotateCw className="animate-spin" size={12}/> : null} Mnemonic
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {aiHelp && <div className="mt-6 bg-white p-4 rounded-lg shadow border border-indigo-100 max-w-xl w-full text-sm text-slate-700 animate-fade-in"><strong className="text-indigo-600 block mb-1">AI Helper:</strong> <FormattedText text={aiHelp}/></div>}
+                <div className="mt-8 text-slate-400 font-medium">Card {idx + 1} / {cards.length}</div>
+            </div>
+        </div>
+    );
+};
+
+const QuizMode = ({ questions, onBack }) => {
+    const [answers, setAnswers] = useState({});
+    const [submitted, setSubmitted] = useState(false);
+    const score = Object.keys(answers).reduce((acc, key) => acc + (answers[key] === questions[key].a ? 1 : 0), 0);
+
+    return (
+        <div className="max-w-3xl mx-auto p-6">
+            <div className="flex justify-between mb-8 sticky top-0 bg-[#f8fafc] py-4 z-10 border-b">
+                <button onClick={onBack} className="flex gap-2 text-slate-500 hover:text-indigo-600 font-medium"><ChevronLeft/> Exit</button>
+                {submitted && <div className="bg-indigo-100 text-indigo-700 px-4 py-2 rounded-lg font-bold">Score: {score} / {questions.length}</div>}
+            </div>
+            <div className="space-y-8 pb-12">
+                {questions.map((q, idx) => {
+                    const sel = answers[idx];
+                    const correct = q.a === idx;
+                    let status = "bg-white border-slate-200";
+                    if (submitted) status = (sel === q.a) ? "bg-emerald-50 border-emerald-200" : (sel !== undefined ? "bg-red-50 border-red-200" : status);
+                    
+                    return (
+                        <div key={idx} className={`p-6 rounded-xl border shadow-sm ${status}`}>
+                            <div className="font-medium text-lg mb-4 flex gap-3"><span className="text-slate-400 font-bold">{idx + 1}.</span><FormattedText text={q.q}/></div>
+                            <div className="space-y-2 pl-6">
+                                {q.options.map((opt, oIdx) => (
+                                    <button key={oIdx} disabled={submitted} onClick={() => setAnswers({...answers, [idx]: oIdx})} className={`w-full text-left p-3 rounded-lg border transition flex gap-3 ${submitted ? (oIdx === q.a ? "bg-emerald-100 border-emerald-300 font-bold" : (sel === oIdx ? "bg-red-100 border-red-300" : "opacity-60")) : (sel === oIdx ? "bg-indigo-50 border-indigo-400 ring-1 ring-indigo-400" : "hover:bg-slate-50")}`}>
+                                        <div className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 ${sel === oIdx ? 'border-current' : 'border-slate-300'}`}>{sel === oIdx && <div className="w-2.5 h-2.5 rounded-full bg-current"></div>}</div>
+                                        <FormattedText text={opt}/>
+                                    </button>
+                                ))}
+                            </div>
+                            {submitted && <div className="mt-4 ml-6 p-3 text-sm bg-white/50 rounded border text-slate-600"><strong>Explanation:</strong> <FormattedText text={q.exp}/></div>}
+                        </div>
+                    );
+                })}
+            </div>
+            {!submitted && <div className="sticky bottom-6 flex justify-center"><button onClick={() => setSubmitted(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-8 rounded-full shadow-xl transition hover:-translate-y-1">Submit Quiz</button></div>}
+        </div>
+    );
+};
 
 export default function App() {
     const [user, setUser] = useState(null);
@@ -674,9 +830,14 @@ export default function App() {
     const addFolder = async () => {
         const name = prompt("Enter folder name:");
         if (name && user) {
-            await addDoc(collection(db, `users/${user.uid}/folders`), {
-                name, createdAt: serverTimestamp()
-            });
+            try {
+                await addDoc(collection(db, `users/${user.uid}/folders`), {
+                    name, createdAt: serverTimestamp()
+                });
+            } catch (error) {
+                console.error("Error adding folder:", error);
+                alert("Failed to add folder. Check console for details. (Likely Firestore Permissions)");
+            }
         }
     };
 
