@@ -3,7 +3,8 @@ import {
     BookOpen, Brain, ChevronLeft, ChevronRight, Settings, 
     Plus, Trash2, GraduationCap, FileText, Sparkles, 
     RotateCw, CheckCircle, XCircle, Folder, ChevronDown,
-    Mic, Presentation, BookOpenText, PieChart, AlertCircle
+    Mic, Presentation, BookOpenText, PieChart, AlertCircle,
+    LayoutDashboard
 } from 'lucide-react';
 
 // --- UTILS ---
@@ -74,11 +75,10 @@ const generateContent = async (apiKey, prompt, context, systemInstruction) => {
                         return JSON.parse(fixedText);
                     }
                 }
-                // If it's an object (like coverage analysis), try to close it
+                // Try to close unclosed JSON objects
                 if (cleanText.trim().startsWith('{') && !cleanText.trim().endsWith('}')) {
                      const lastQuote = cleanText.lastIndexOf('"');
                      if (lastQuote !== -1) {
-                         // Very rough heuristic for closing a JSON object
                          return JSON.parse(cleanText.substring(0, lastQuote + 1) + '"}'); 
                      }
                 }
@@ -96,21 +96,22 @@ const generateContent = async (apiKey, prompt, context, systemInstruction) => {
 // --- COMPONENTS ---
 
 // 1. Sidebar Navigation
-const Sidebar = ({ folders, decks, activeDeckId, onSelectDeck, onAddFolder, onDeleteFolder, onAddDeck, onDeleteDeck, onSettings }) => {
+const Sidebar = ({ folders, decks, activeId, viewMode, onSelectDeck, onSelectFolder, onAddFolder, onDeleteFolder, onAddDeck, onDeleteDeck, onSettings }) => {
     const [expandedFolders, setExpandedFolders] = useState({});
 
     const toggleFolder = (folderId) => {
         setExpandedFolders(prev => ({ ...prev, [folderId]: !prev[folderId] }));
     };
 
+    // Auto-expand folder if active item is inside it
     useEffect(() => {
-        if (activeDeckId) {
-            const activeDeck = decks.find(d => d.id === activeDeckId);
-            if (activeDeck) {
-                setExpandedFolders(prev => ({ ...prev, [activeDeck.folderId]: true }));
-            }
+        if (viewMode === 'deck' && activeId) {
+            const activeDeck = decks.find(d => d.id === activeId);
+            if (activeDeck) setExpandedFolders(prev => ({ ...prev, [activeDeck.folderId]: true }));
+        } else if (viewMode === 'folder' && activeId) {
+            setExpandedFolders(prev => ({ ...prev, [activeId]: true }));
         }
-    }, [activeDeckId, decks]);
+    }, [activeId, viewMode, decks]);
 
     return (
         <div className="w-full md:w-64 bg-slate-900 text-white flex flex-col h-screen fixed md:relative z-20 shadow-xl border-r border-slate-800">
@@ -144,14 +145,24 @@ const Sidebar = ({ folders, decks, activeDeckId, onSelectDeck, onAddFolder, onDe
 
                         {expandedFolders[folder.id] && (
                             <div className="pl-6 space-y-1 border-l-2 border-slate-800 ml-2.5 transition-all">
+                                {/* Folder Overview Link */}
+                                <div 
+                                    onClick={() => onSelectFolder(folder.id)}
+                                    className={`group flex items-center gap-2 px-3 py-2 rounded-md cursor-pointer transition-all mb-1 ${viewMode === 'folder' && activeId === folder.id ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}
+                                >
+                                    <PieChart size={14} />
+                                    <div className="truncate text-xs font-medium">Course Overview</div>
+                                </div>
+
+                                {/* Decks List */}
                                 {decks.filter(d => d.folderId === folder.id).map(deck => (
                                     <div key={deck.id} 
                                          onClick={() => onSelectDeck(deck.id)}
-                                         className={`group flex items-center justify-between px-3 py-2 rounded-md cursor-pointer transition-all ${activeDeckId === deck.id ? 'bg-indigo-600/20 text-indigo-300 border border-indigo-500/30' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}>
+                                         className={`group flex items-center justify-between px-3 py-2 rounded-md cursor-pointer transition-all ${viewMode === 'deck' && activeId === deck.id ? 'bg-indigo-600/20 text-indigo-300 border border-indigo-500/30' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}>
                                         <div className="truncate text-xs font-medium">{deck.title}</div>
                                         <button 
                                             onClick={(e) => { e.stopPropagation(); onDeleteDeck(deck.id); }} 
-                                            className={`opacity-0 group-hover:opacity-100 hover:text-red-400 transition ${activeDeckId === deck.id ? 'opacity-100' : ''}`}
+                                            className={`opacity-0 group-hover:opacity-100 hover:text-red-400 transition ${viewMode === 'deck' && activeId === deck.id ? 'opacity-100' : ''}`}
                                         >
                                             <Trash2 size={12} />
                                         </button>
@@ -179,31 +190,190 @@ const Sidebar = ({ folders, decks, activeDeckId, onSelectDeck, onAddFolder, onDe
     );
 };
 
-// 2. Input & Dashboard
-const Dashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
-    const [isGenerating, setIsGenerating] = useState(false);
+// 2. Folder Dashboard (Course Overview)
+const FolderDashboard = ({ folder, decks, onUpdateFolder, apiKey }) => {
     const [isAnalyzing, setIsAnalyzing] = useState(false);
+    const [syllabusText, setSyllabusText] = useState(folder.syllabus || "");
+
+    useEffect(() => {
+        setSyllabusText(folder.syllabus || "");
+    }, [folder.id]);
+
+    const handleSaveSyllabus = () => {
+        onUpdateFolder({ ...folder, syllabus: syllabusText });
+    };
+
+    const handleAnalyze = async () => {
+        if (!syllabusText.trim()) return alert("Please paste the Course Outline first.");
+        if (!apiKey) return alert("API Key missing.");
+
+        setIsAnalyzing(true);
+        try {
+            // AGGREGATE ALL CONTENT
+            const allContent = decks.map(d => `
+                MODULE: ${d.title}
+                NOTES: ${d.notes || ''}
+                SLIDES: ${d.slides || ''}
+                TRANSCRIPT: ${d.transcript || ''}
+            `).join("\n\n----------------\n\n");
+
+            if (!allContent.trim()) return alert("No content found in modules! Add notes to your modules first.");
+
+            const prompt = `
+                You are a Course Auditor.
+                
+                TASK: Compare the student's study materials (from all modules combined) against the Official Course Syllabus.
+                
+                Calculate a coverage score (0-100%).
+                Identify STRONG areas (well covered in notes).
+                Identify WEAK/MISSING areas (in syllabus but missing in notes).
+                
+                RETURN JSON:
+                {
+                    "score": 0,
+                    "analysis": "Summary string...",
+                    "missing": "Summary string of missing topics..."
+                }
+            `;
+
+            const context = `
+                OFFICIAL SYLLABUS:
+                ${syllabusText}
+
+                STUDENT STUDY MATERIALS (ALL MODULES):
+                ${allContent}
+            `;
+
+            const result = await generateContent(apiKey, prompt, context, "");
+            onUpdateFolder({ ...folder, syllabus: syllabusText, coverage: result });
+
+        } catch (error) {
+            alert(error.message);
+        } finally {
+            setIsAnalyzing(false);
+        }
+    };
+
+    // Calculate aggregate stats
+    const totalCards = decks.reduce((sum, d) => sum + (d.cards?.length || 0), 0);
+    const totalQuestions = decks.reduce((sum, d) => sum + (d.quiz?.length || 0), 0);
+
+    return (
+        <div className="max-w-6xl mx-auto p-6 h-full flex flex-col">
+            <div className="mb-8">
+                <h2 className="text-3xl font-bold text-slate-800 flex items-center gap-3">
+                    <Folder size={32} className="text-indigo-500"/> {folder.name} <span className="text-slate-400 text-lg font-normal">/ Course Overview</span>
+                </h2>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 flex-1 min-h-0">
+                {/* Syllabus Input */}
+                <div className="lg:col-span-8 flex flex-col gap-4 h-full">
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex-1 flex flex-col">
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="font-bold text-slate-700 flex items-center gap-2">
+                                <BookOpenText size={20} className="text-emerald-500"/> Course Syllabus / Outline
+                            </h3>
+                            <button onClick={handleSaveSyllabus} className="text-xs text-indigo-600 font-medium hover:underline">Save Text</button>
+                        </div>
+                        <textarea 
+                            className="flex-1 w-full p-4 bg-slate-50 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-sm font-mono leading-relaxed"
+                            placeholder="Paste your entire course outline, syllabus, or learning outcomes here..."
+                            value={syllabusText}
+                            onChange={(e) => setSyllabusText(e.target.value)}
+                            onBlur={handleSaveSyllabus}
+                        ></textarea>
+                        <div className="mt-4">
+                            <button 
+                                onClick={handleAnalyze}
+                                disabled={isAnalyzing}
+                                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70"
+                            >
+                                {isAnalyzing ? <RotateCw className="animate-spin"/> : <PieChart/>}
+                                {isAnalyzing ? "Auditing Course Content..." : "Analyze Full Course Coverage"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Sidebar Stats */}
+                <div className="lg:col-span-4 space-y-6 overflow-y-auto">
+                    {/* Coverage Result */}
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                        <h3 className="font-semibold text-slate-700 mb-4 flex items-center gap-2">
+                            <CheckCircle size={18} className="text-indigo-500"/> Content Audit
+                        </h3>
+                        {folder.coverage ? (
+                            <div className="space-y-4 animate-fade-in">
+                                <div className="flex items-end gap-2">
+                                    <span className={`text-4xl font-bold ${folder.coverage.score >= 80 ? 'text-emerald-600' : folder.coverage.score >= 50 ? 'text-yellow-600' : 'text-red-600'}`}>
+                                        {folder.coverage.score}%
+                                    </span>
+                                    <span className="text-sm text-slate-500 mb-1">Coverage Score</span>
+                                </div>
+                                <div className="w-full bg-slate-100 rounded-full h-2">
+                                    <div className="bg-emerald-500 h-2 rounded-full transition-all duration-1000" style={{ width: `${folder.coverage.score}%` }}></div>
+                                </div>
+                                <div className="p-3 bg-slate-50 rounded-lg text-sm text-slate-700 border border-slate-100">
+                                    {folder.coverage.analysis}
+                                </div>
+                                {folder.coverage.missing && (
+                                    <div className="p-3 bg-red-50 rounded-lg text-sm text-red-700 border border-red-100">
+                                        <div className="font-bold flex items-center gap-2 mb-1"><AlertCircle size={14}/> Missing Topics:</div>
+                                        {folder.coverage.missing}
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="text-center text-slate-400 py-8 text-sm">
+                                Run an analysis to see how well your modules cover the syllabus.
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Aggregate Stats */}
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                        <h3 className="font-semibold text-slate-700 mb-4">Course Totals</h3>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="bg-slate-50 p-4 rounded-lg text-center">
+                                <div className="text-2xl font-bold text-slate-800">{decks.length}</div>
+                                <div className="text-xs text-slate-500 uppercase">Modules</div>
+                            </div>
+                            <div className="bg-indigo-50 p-4 rounded-lg text-center">
+                                <div className="text-2xl font-bold text-indigo-600">{totalCards}</div>
+                                <div className="text-xs text-indigo-400 uppercase">Cards</div>
+                            </div>
+                            <div className="bg-emerald-50 p-4 rounded-lg text-center col-span-2">
+                                <div className="text-2xl font-bold text-emerald-600">{totalQuestions}</div>
+                                <div className="text-xs text-emerald-400 uppercase">Quiz Questions</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// 3. Module Dashboard (Single Deck)
+const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
+    const [isGenerating, setIsGenerating] = useState(false);
     const [statusMessage, setStatusMessage] = useState("");
     const [genType, setGenType] = useState("flashcards");
     const [count, setCount] = useState(10);
     const [activeTab, setActiveTab] = useState('notes');
     
-    // State for inputs
     const [inputs, setInputs] = useState({
         notes: deck.notes || deck.content || "",
         transcript: deck.transcript || "",
-        slides: deck.slides || "",
-        outline: deck.outline || "",
-        courseName: deck.courseName || ""
+        slides: deck.slides || ""
     });
 
     useEffect(() => {
         setInputs({
             notes: deck.notes || deck.content || "",
             transcript: deck.transcript || "",
-            slides: deck.slides || "",
-            outline: deck.outline || "",
-            courseName: deck.courseName || ""
+            slides: deck.slides || ""
         });
     }, [deck.id]);
 
@@ -216,46 +386,28 @@ const Dashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
     const clearContent = (type) => {
         const key = type === 'flashcards' ? 'cards' : 'quiz';
         if (!deck[key] || deck[key].length === 0) return;
-        
-        if (confirm(`Are you sure you want to delete all ${type}? This action cannot be undone.`)) {
-            onUpdateDeck({ ...deck, [key]: [] });
-        }
-    };
-
-    // --- SYSTEM PROMPT GENERATOR ---
-    const getSystemInstruction = () => {
-        let instruction = `You are an expert tutor specializing in ${inputs.courseName || "general studies"}.`;
-        if (userProfile.age) instruction += ` The student is ${userProfile.age} years old.`;
-        if (userProfile.degree) instruction += ` They are studying for a ${userProfile.degree}.`;
-        
-        instruction += ` Adjust your language, complexity, and examples to suit this profile perfectly.`;
-        
-        if (inputs.outline.trim()) {
-            instruction += ` STRICTLY adhere to the following Course Outline when selecting topics: ${inputs.outline.substring(0, 1000)}...`;
-        }
-        return instruction;
+        if (confirm(`Delete all ${type}?`)) onUpdateDeck({ ...deck, [key]: [] });
     };
 
     const handleGenerate = async () => {
-        if (!inputs.notes.trim() && !inputs.transcript.trim() && !inputs.slides.trim()) {
-            return alert("Please enter content in at least one tab!");
-        }
-        if (!apiKey) return alert("Please enter your API Key in Settings.");
+        if (!inputs.notes.trim() && !inputs.transcript.trim() && !inputs.slides.trim()) return alert("Please enter content!");
+        if (!apiKey) return alert("API Key missing.");
 
         setIsGenerating(true);
         setStatusMessage("Initializing...");
-
         const currentInputs = { ...inputs };
 
         try {
             const combinedContext = `
-                COURSE: ${currentInputs.courseName}
-                LECTURE NOTES: ${currentInputs.notes}
-                LECTURE TRANSCRIPT: ${currentInputs.transcript}
-                SLIDES CONTENT: ${currentInputs.slides}
+                MODULE: ${deck.title}
+                NOTES: ${currentInputs.notes}
+                TRANSCRIPT: ${currentInputs.transcript}
+                SLIDES: ${currentInputs.slides}
             `;
 
-            // Batching Logic
+            let systemInstruction = `Target audience: ${userProfile.age || 'University'} student`;
+            if (userProfile.degree) systemInstruction += ` studying ${userProfile.degree}.`;
+
             const BATCH_SIZE = 5; 
             const totalBatches = Math.ceil(count / BATCH_SIZE);
             let accumulatedResults = [];
@@ -266,251 +418,118 @@ const Dashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
 
                 const itemsRemaining = count - accumulatedResults.length;
                 const currentBatchCount = Math.min(BATCH_SIZE, itemsRemaining);
+                const avoidInstruction = accumulatedResults.length > 0 ? ` Do NOT repeat: ${accumulatedResults.slice(-5).map(item => item.q.substring(0, 15)).join(", ")}...` : "";
 
-                const avoidInstruction = accumulatedResults.length > 0 
-                    ? ` IMPORTANT: Do NOT repeat these concepts: ${accumulatedResults.slice(-5).map(item => item.q.substring(0, 20)).join(", ")}...` 
-                    : "";
-
-                let prompt = "";
-                if (genType === "flashcards") {
-                    prompt = `Generate ${currentBatchCount} unique, high-quality flashcards based on the context. Return JSON format: [{"q": "...", "a": "..."}]. ${avoidInstruction}`;
-                } else {
-                    prompt = `Generate ${currentBatchCount} unique multiple choice questions. Return JSON format: [{"q": "...", "options": ["A","B","C","D"], "a": 0, "exp": "..."}]. ${avoidInstruction}`;
-                }
+                let prompt = genType === "flashcards" 
+                    ? `Generate ${currentBatchCount} flashcards (JSON: [{"q":..., "a":...}]).${avoidInstruction}`
+                    : `Generate ${currentBatchCount} MCQs (JSON: [{"q":..., "options":..., "a":..., "exp":...}]).${avoidInstruction}`;
 
                 try {
-                    const batchResult = await generateContent(apiKey, prompt, combinedContext, getSystemInstruction());
+                    const batchResult = await generateContent(apiKey, prompt, combinedContext, systemInstruction);
                     accumulatedResults = [...accumulatedResults, ...batchResult];
                 } catch (batchError) {
-                    console.error(`Batch ${i+1} failed:`, batchError);
+                    console.error(batchError);
                     break; 
                 }
             }
             
             setStatusMessage("Saving...");
             const updatedDeck = { ...deck, ...currentInputs }; 
-            if (genType === "flashcards") {
-                updatedDeck.cards = [...(deck.cards || []), ...accumulatedResults];
-            } else {
-                updatedDeck.quiz = [...(deck.quiz || []), ...accumulatedResults];
-            }
+            if (genType === "flashcards") updatedDeck.cards = [...(deck.cards || []), ...accumulatedResults];
+            else updatedDeck.quiz = [...(deck.quiz || []), ...accumulatedResults];
+            
             onUpdateDeck(updatedDeck);
 
         } catch (error) {
-            alert("Critical Error: " + error.message);
+            alert(error.message);
         } finally {
             setIsGenerating(false);
             setStatusMessage("");
         }
     };
 
-    const handleCoverageAnalysis = async () => {
-        if (!inputs.outline.trim()) return alert("Please paste a Course Outline first to analyze coverage.");
-        if (!apiKey) return alert("API Key missing.");
-
-        setIsAnalyzing(true);
-        try {
-            const combinedContext = `
-                COURSE OUTLINE: ${inputs.outline}
-                
-                MY STUDY MATERIALS (Notes/Slides/Transcript):
-                ${inputs.notes}
-                ${inputs.slides}
-                ${inputs.transcript}
-            `;
-
-            const prompt = `
-                Analyze how well 'MY STUDY MATERIALS' cover the topics listed in 'COURSE OUTLINE'.
-                Return a JSON object: 
-                { 
-                    "score": (number 0-100), 
-                    "analysis": "A brief summary of what is covered well.",
-                    "missing": "A brief summary of key topics from the outline that are MISSING or weak in the notes."
-                }
-            `;
-
-            const result = await generateContent(apiKey, prompt, combinedContext, getSystemInstruction());
-            onUpdateDeck({ ...deck, ...inputs, coverage: result });
-
-        } catch (error) {
-            alert("Analysis failed: " + error.message);
-        } finally {
-            setIsAnalyzing(false);
-        }
-    };
-
     const TabButton = ({ id, label, icon: Icon, colorClass }) => (
         <button 
             onClick={() => setActiveTab(id)}
-            className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === id 
-                ? `border-${colorClass}-500 text-${colorClass}-600 bg-${colorClass}-50/50` 
-                : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'
-            }`}
+            className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === id ? `border-${colorClass}-500 text-${colorClass}-600 bg-${colorClass}-50/50` : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
         >
-            <Icon size={16} className={activeTab === id ? `text-${colorClass}-500` : ''} />
-            {label}
-            {inputs[id].length > 0 && (
-                <span className={`ml-1 w-2 h-2 rounded-full ${activeTab === id ? `bg-${colorClass}-400` : 'bg-slate-300'}`} />
-            )}
+            <Icon size={16} className={activeTab === id ? `text-${colorClass}-500` : ''} /> {label}
+            {inputs[id].length > 0 && <span className={`ml-1 w-2 h-2 rounded-full ${activeTab === id ? `bg-${colorClass}-400` : 'bg-slate-300'}`} />}
         </button>
     );
 
     return (
         <div className="max-w-6xl mx-auto p-6">
-            <div className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="mb-6">
                 <input 
                     value={deck.title} 
                     onChange={(e) => onUpdateDeck({...deck, title: e.target.value})}
-                    className="text-3xl font-bold bg-transparent border-b-2 border-transparent hover:border-slate-200 focus:border-indigo-500 focus:outline-none text-slate-800 flex-1"
-                    placeholder="Module Title (e.g. Genomics)"
-                />
-                <input 
-                    value={inputs.courseName}
-                    onChange={(e) => handleInputChange('courseName', e.target.value)}
-                    className="md:w-64 p-2 bg-white border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                    placeholder="Course Code (e.g. BABS2204)"
+                    className="text-3xl font-bold bg-transparent border-b-2 border-transparent hover:border-slate-200 focus:border-indigo-500 focus:outline-none w-full pb-2 text-slate-800"
+                    placeholder="Module Title"
                 />
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-                {/* Input Area */}
                 <div className="lg:col-span-8 bg-white rounded-xl shadow-sm border border-slate-200 h-[650px] flex flex-col overflow-hidden">
-                    <div className="flex border-b border-slate-200 bg-slate-50/50 overflow-x-auto">
+                    <div className="flex border-b border-slate-200 bg-slate-50/50">
                         <TabButton id="notes" label="Notes" icon={FileText} colorClass="indigo" />
                         <TabButton id="transcript" label="Transcript" icon={Mic} colorClass="purple" />
                         <TabButton id="slides" label="Slides" icon={Presentation} colorClass="pink" />
-                        <TabButton id="outline" label="Outline" icon={BookOpenText} colorClass="emerald" />
                     </div>
-                    
                     <textarea 
                         className="flex-1 w-full p-6 resize-none focus:outline-none focus:bg-slate-50/30 text-sm leading-relaxed font-mono text-slate-700"
-                        placeholder={
-                            activeTab === 'outline' ? "Paste your Course Outline or Syllabus here. The AI will use this to ensure your study materials cover all required topics." :
-                            `Paste your ${activeTab} content here...`
-                        }
+                        placeholder={`Paste your ${activeTab} content here...`}
                         value={inputs[activeTab]}
                         onChange={(e) => handleInputChange(activeTab, e.target.value)}
                     ></textarea>
-                    
                     <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row gap-4 items-center justify-between">
                         <div className="flex gap-4 text-sm text-slate-600">
                             <div className="flex items-center gap-2">
                                 <span className="font-medium">Generate:</span>
-                                <select value={genType} onChange={(e) => setGenType(e.target.value)} className="bg-white rounded-md px-3 py-1.5 border border-slate-300 focus:border-indigo-500 focus:outline-none">
+                                <select value={genType} onChange={(e) => setGenType(e.target.value)} className="bg-white rounded-md px-3 py-1.5 border border-slate-300 focus:outline-none">
                                     <option value="flashcards">Flashcards</option>
                                     <option value="mcq">Quiz (MCQ)</option>
                                 </select>
                             </div>
                             <div className="flex items-center gap-2">
                                 <span className="font-medium">Count:</span>
-                                <input type="number" min="1" max="50" value={count} onChange={(e) => setCount(e.target.value)} className="w-16 bg-white rounded-md px-3 py-1.5 border border-slate-300 focus:border-indigo-500 focus:outline-none"/>
+                                <input type="number" min="1" max="50" value={count} onChange={(e) => setCount(e.target.value)} className="w-16 bg-white rounded-md px-3 py-1.5 border border-slate-300 focus:outline-none"/>
                             </div>
                         </div>
-                        <button 
-                            onClick={handleGenerate}
-                            disabled={isGenerating}
-                            className="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 px-6 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed shadow-sm hover:shadow"
-                        >
-                            {isGenerating ? <RotateCw className="animate-spin" size={18}/> : <Sparkles size={18}/>}
-                            {isGenerating ? statusMessage : "Generate Content"}
+                        <button onClick={handleGenerate} disabled={isGenerating} className="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 px-6 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 shadow-sm">
+                            {isGenerating ? <RotateCw className="animate-spin" size={18}/> : <Sparkles size={18}/>} {isGenerating ? statusMessage : "Generate Content"}
                         </button>
                     </div>
                 </div>
 
-                {/* Stats & Coverage */}
                 <div className="lg:col-span-4 space-y-6">
-                    {/* Coverage Card */}
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                        <div className="flex items-center justify-between mb-4">
-                            <h3 className="font-semibold text-slate-700 flex items-center gap-2">
-                                <PieChart size={18} className="text-emerald-500"/> Outline Coverage
-                            </h3>
-                            {deck.coverage && (
-                                <span className={`text-xl font-bold ${deck.coverage.score >= 80 ? 'text-emerald-600' : deck.coverage.score >= 50 ? 'text-yellow-600' : 'text-red-600'}`}>
-                                    {deck.coverage.score}%
-                                </span>
-                            )}
-                        </div>
-                        
-                        {!deck.coverage ? (
-                            <div className="text-center py-4">
-                                <p className="text-xs text-slate-400 mb-4">Paste your outline and notes to see if you're missing anything.</p>
-                                <button 
-                                    onClick={handleCoverageAnalysis} 
-                                    disabled={isAnalyzing}
-                                    className="w-full py-2 border border-emerald-200 bg-emerald-50 text-emerald-700 rounded-lg hover:bg-emerald-100 transition text-sm font-medium flex items-center justify-center gap-2"
-                                >
-                                    {isAnalyzing ? <RotateCw className="animate-spin" size={14}/> : <CheckCircle size={14}/>}
-                                    Check Coverage
-                                </button>
-                            </div>
-                        ) : (
-                            <div className="space-y-3">
-                                <div className="w-full bg-slate-100 rounded-full h-2">
-                                    <div className="bg-emerald-500 h-2 rounded-full transition-all duration-1000" style={{ width: `${deck.coverage.score}%` }}></div>
-                                </div>
-                                <div className="text-xs text-slate-600 bg-slate-50 p-3 rounded border border-slate-100">
-                                    <strong className="block text-slate-800 mb-1">Analysis:</strong> {deck.coverage.analysis}
-                                </div>
-                                {deck.coverage.missing && (
-                                    <div className="text-xs text-red-600 bg-red-50 p-3 rounded border border-red-100">
-                                        <strong className="block text-red-800 mb-1 flex items-center gap-1"><AlertCircle size={10}/> Missing / Weak:</strong> 
-                                        {deck.coverage.missing}
-                                    </div>
-                                )}
-                                <button onClick={handleCoverageAnalysis} className="text-xs text-emerald-600 hover:underline w-full text-center mt-2">Re-analyze</button>
-                            </div>
-                        )}
-                    </div>
-
-                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                        <h3 className="font-semibold text-slate-700 mb-4 flex items-center gap-2">
-                            <Brain size={18} className="text-slate-400"/> Stats
-                        </h3>
+                        <h3 className="font-semibold text-slate-700 mb-4 flex items-center gap-2"><Brain size={18}/> Stats</h3>
                         <div className="grid grid-cols-2 gap-4">
                             <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-100 flex flex-col items-center justify-center text-center relative group">
-                                <button 
-                                    onClick={() => clearContent('flashcards')}
-                                    className="absolute top-2 right-2 text-indigo-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition p-1"
-                                    title="Clear all flashcards"
-                                >
-                                    <Trash2 size={14} />
-                                </button>
+                                <button onClick={() => clearContent('flashcards')} className="absolute top-2 right-2 text-indigo-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition p-1"><Trash2 size={14}/></button>
                                 <div className="text-3xl font-bold text-indigo-600 mb-1">{deck.cards?.length || 0}</div>
-                                <div className="text-xs text-indigo-400 font-bold uppercase tracking-wider">Flashcards</div>
+                                <div className="text-xs text-indigo-400 font-bold uppercase">Flashcards</div>
                             </div>
                             <div className="bg-emerald-50 p-4 rounded-lg border border-emerald-100 flex flex-col items-center justify-center text-center relative group">
-                                <button 
-                                    onClick={() => clearContent('quiz')}
-                                    className="absolute top-2 right-2 text-emerald-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition p-1"
-                                    title="Clear all questions"
-                                >
-                                    <Trash2 size={14} />
-                                </button>
+                                <button onClick={() => clearContent('quiz')} className="absolute top-2 right-2 text-emerald-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition p-1"><Trash2 size={14}/></button>
                                 <div className="text-3xl font-bold text-emerald-600 mb-1">{deck.quiz?.length || 0}</div>
-                                <div className="text-xs text-emerald-400 font-bold uppercase tracking-wider">Questions</div>
+                                <div className="text-xs text-emerald-400 font-bold uppercase">Questions</div>
                             </div>
                         </div>
                     </div>
-                    
                     <div className="space-y-3">
                         <button onClick={() => onUpdateDeck({...deck, mode: 'flashcards'})} disabled={!deck.cards?.length} className="group w-full bg-white border border-slate-200 hover:border-indigo-500 hover:shadow-md p-4 rounded-xl text-left transition disabled:opacity-50">
                             <div className="flex items-center justify-between mb-1">
-                                <span className="font-bold text-slate-800 group-hover:text-indigo-600 transition">Study Flashcards</span>
-                                <div className="p-2 bg-indigo-50 rounded-lg group-hover:bg-indigo-100 transition">
-                                    <BookOpen size={20} className="text-indigo-500"/>
-                                </div>
+                                <span className="font-bold text-slate-800 group-hover:text-indigo-600">Study Flashcards</span>
+                                <BookOpen size={20} className="text-indigo-500"/>
                             </div>
                             <p className="text-sm text-slate-500">Review terms and concepts.</p>
                         </button>
-                        
                         <button onClick={() => onUpdateDeck({...deck, mode: 'quiz'})} disabled={!deck.quiz?.length} className="group w-full bg-white border border-slate-200 hover:border-emerald-500 hover:shadow-md p-4 rounded-xl text-left transition disabled:opacity-50">
                             <div className="flex items-center justify-between mb-1">
-                                <span className="font-bold text-slate-800 group-hover:text-emerald-600 transition">Practice Quiz</span>
-                                <div className="p-2 bg-emerald-50 rounded-lg group-hover:bg-emerald-100 transition">
-                                    <Brain size={20} className="text-emerald-500"/>
-                                </div>
+                                <span className="font-bold text-slate-800 group-hover:text-emerald-600">Practice Quiz</span>
+                                <Brain size={20} className="text-emerald-500"/>
                             </div>
                             <p className="text-sm text-slate-500">Test your retention.</p>
                         </button>
@@ -521,211 +540,108 @@ const Dashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
     );
 };
 
-// 3. Flashcard Mode
+// 4. Flashcard & Quiz Modes (Reusable)
 const FlashcardStudy = ({ cards, onBack, apiKey }) => {
     const [idx, setIdx] = useState(0);
     const [flipped, setFlipped] = useState(false);
     const [aiHelp, setAiHelp] = useState(null);
-    const [loadingHelp, setLoadingHelp] = useState(false);
-
     const card = cards[idx];
 
-    const next = useCallback(() => { 
-        setFlipped(false); 
-        setAiHelp(null); 
-        setIdx((prev) => (prev + 1) % cards.length); 
-    }, [cards.length]);
-
-    const prev = useCallback(() => { 
-        setFlipped(false); 
-        setAiHelp(null); 
-        setIdx((prev) => (prev - 1 + cards.length) % cards.length); 
-    }, [cards.length]);
-
-    const getHelp = async (type) => {
-        if (!apiKey) return alert("Need API Key");
-        setLoadingHelp(true);
-        try {
-            const prompt = type === 'simplify'
-                ? `Explain simply. Return JSON: {"text": "explanation..."}. Context: Q: ${card.q}, A: ${card.a}`
-                : `Create mnemonic. Return JSON: {"text": "mnemonic..."}. Context: Q: ${card.q}, A: ${card.a}`;
-            
-            const result = await generateContent(apiKey, prompt, "");
-            setAiHelp(result.text);
-        } catch (e) {
-            alert("AI Error");
-        } finally {
-            setLoadingHelp(false);
-        }
-    };
+    const next = useCallback(() => { setFlipped(false); setAiHelp(null); setIdx((prev) => (prev + 1) % cards.length); }, [cards.length]);
+    const prev = useCallback(() => { setFlipped(false); setAiHelp(null); setIdx((prev) => (prev - 1 + cards.length) % cards.length); }, [cards.length]);
 
     useEffect(() => {
-        const handleKeyDown = (e) => {
-            if (e.code === 'Space') {
-                e.preventDefault(); 
-                setFlipped(prev => !prev);
-            } else if (e.code === 'ArrowRight') next();
-            else if (e.code === 'ArrowLeft') prev();
-        };
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
+        const h = (e) => { if (e.code === 'Space') { e.preventDefault(); setFlipped(p=>!p); } else if (e.code === 'ArrowRight') next(); else if (e.code === 'ArrowLeft') prev(); };
+        window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h);
     }, [next, prev]);
+
+    const getHelp = async (type) => {
+        try {
+            const res = await generateContent(apiKey, `Provide a ${type} for: Q: ${card.q}, A: ${card.a}. Return JSON: {"text": "..."}`, "");
+            setAiHelp(res.text);
+        } catch(e) { alert("AI Error"); }
+    };
 
     return (
         <div className="h-full flex flex-col p-6 max-w-4xl mx-auto w-full">
-            <button onClick={onBack} className="self-start mb-4 flex items-center gap-2 text-slate-500 hover:text-indigo-600 transition font-medium">
-                <ChevronLeft size={20} /> Back to Dashboard
-            </button>
-
+            <button onClick={onBack} className="self-start mb-4 flex gap-2 text-slate-500 hover:text-indigo-600 font-medium"><ChevronLeft/> Back</button>
             <div className="flex-1 flex flex-col items-center justify-center relative perspective-1000">
-                <div className="absolute top-1/2 -left-4 md:-left-16 transform -translate-y-1/2 z-10">
-                    <button onClick={prev} className="p-3 bg-white rounded-full shadow-lg hover:bg-slate-50 text-slate-600 hover:scale-110 transition"><ChevronLeft/></button>
-                </div>
-                <div className="absolute top-1/2 -right-4 md:-right-16 transform -translate-y-1/2 z-10">
-                    <button onClick={next} className="p-3 bg-white rounded-full shadow-lg hover:bg-slate-50 text-slate-600 hover:scale-110 transition"><ChevronRight/></button>
-                </div>
-
-                <div className="w-full max-w-2xl h-96 relative cursor-pointer group" onClick={() => setFlipped(!flipped)}>
+                <button onClick={prev} className="absolute left-0 p-3 bg-white rounded-full shadow hover:scale-110 transition z-10"><ChevronLeft/></button>
+                <button onClick={next} className="absolute right-0 p-3 bg-white rounded-full shadow hover:scale-110 transition z-10"><ChevronRight/></button>
+                <div className="w-full max-w-2xl h-96 relative cursor-pointer" onClick={() => setFlipped(!flipped)}>
                     <div className="w-full h-full relative shadow-2xl rounded-2xl" style={{ transformStyle: 'preserve-3d', transition: 'transform 0.6s', transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)' }}>
-                        <div className="absolute w-full h-full bg-white rounded-2xl backface-hidden flex flex-col items-center justify-center p-8 border border-slate-200" style={{ backfaceVisibility: 'hidden' }}>
-                            <span className="absolute top-6 left-6 text-xs font-bold tracking-wider text-slate-400 uppercase">Question</span>
-                            <div className="text-2xl font-medium text-slate-800 text-center">{card.q}</div>
-                            <div className="absolute bottom-6 text-slate-400 text-sm animate-pulse">Click or Space to Flip</div>
+                        <div className="absolute w-full h-full bg-white rounded-2xl backface-hidden flex flex-col items-center justify-center p-8 border" style={{ backfaceVisibility: 'hidden' }}>
+                            <div className="text-2xl font-medium text-center">{card.q}</div>
+                            <div className="absolute bottom-6 text-slate-400 text-sm animate-pulse">Click to Flip</div>
                         </div>
-                        <div className="absolute w-full h-full bg-indigo-600 rounded-2xl backface-hidden rotate-y-180 flex flex-col items-center justify-center p-8 text-white" style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}>
-                            <span className="absolute top-6 left-6 text-xs font-bold tracking-wider text-indigo-200 uppercase">Answer</span>
-                            <div className="text-xl font-medium text-center leading-relaxed overflow-y-auto max-h-full custom-scroll">{card.a}</div>
+                        <div className="absolute w-full h-full bg-indigo-600 rounded-2xl backface-hidden flex flex-col items-center justify-center p-8 text-white" style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}>
+                            <div className="text-xl font-medium text-center overflow-y-auto max-h-full custom-scroll">{card.a}</div>
                             <div className="absolute bottom-6 flex gap-2" onClick={e => e.stopPropagation()}>
-                                <button onClick={() => getHelp('simplify')} className="px-3 py-1 bg-white/20 hover:bg-white/30 rounded-full text-xs font-bold backdrop-blur-sm border border-white/10">Simplify</button>
-                                <button onClick={() => getHelp('mnemonic')} className="px-3 py-1 bg-white/20 hover:bg-white/30 rounded-full text-xs font-bold backdrop-blur-sm border border-white/10">Mnemonic</button>
+                                <button onClick={() => getHelp('simplify')} className="px-3 py-1 bg-white/20 rounded-full text-xs font-bold border border-white/10">Simplify</button>
+                                <button onClick={() => getHelp('mnemonic')} className="px-3 py-1 bg-white/20 rounded-full text-xs font-bold border border-white/10">Mnemonic</button>
                             </div>
                         </div>
                     </div>
                 </div>
-
-                {aiHelp && (
-                    <div className="mt-6 bg-white p-4 rounded-lg shadow-lg max-w-xl w-full border border-indigo-100 animate-fade-in">
-                        <div className="flex items-center gap-2 text-indigo-600 font-bold mb-2 text-sm"><Sparkles size={14}/> AI Tutor</div>
-                        <p className="text-slate-700 text-sm">{aiHelp}</p>
-                    </div>
-                )}
-                
-                <div className="mt-8 text-slate-400 font-medium">Card {idx + 1} of {cards.length}</div>
+                {aiHelp && <div className="mt-6 bg-white p-4 rounded-lg shadow border border-indigo-100 max-w-xl w-full text-sm text-slate-700 animate-fade-in"><strong className="text-indigo-600 block mb-1">AI Helper:</strong> {aiHelp}</div>}
+                <div className="mt-8 text-slate-400 font-medium">Card {idx + 1} / {cards.length}</div>
             </div>
         </div>
     );
 };
 
-// 4. Quiz Mode
 const QuizMode = ({ questions, onBack }) => {
     const [answers, setAnswers] = useState({});
     const [submitted, setSubmitted] = useState(false);
-
-    const score = Object.keys(answers).reduce((acc, key) => {
-        return acc + (answers[key] === questions[key].a ? 1 : 0);
-    }, 0);
+    const score = Object.keys(answers).reduce((acc, key) => acc + (answers[key] === questions[key].a ? 1 : 0), 0);
 
     return (
         <div className="max-w-3xl mx-auto p-6">
-            <div className="flex items-center justify-between mb-8 sticky top-0 bg-[#f8fafc] py-4 z-10 border-b border-slate-200">
-                <button onClick={onBack} className="flex items-center gap-2 text-slate-500 hover:text-indigo-600 transition font-medium">
-                    <ChevronLeft size={20} /> Exit Quiz
-                </button>
-                {submitted && (
-                    <div className="flex items-center gap-2 bg-indigo-100 text-indigo-700 px-4 py-2 rounded-lg font-bold">
-                        <GraduationCap size={18}/> Score: {score} / {questions.length}
-                    </div>
-                )}
+            <div className="flex justify-between mb-8 sticky top-0 bg-[#f8fafc] py-4 z-10 border-b">
+                <button onClick={onBack} className="flex gap-2 text-slate-500 hover:text-indigo-600 font-medium"><ChevronLeft/> Exit</button>
+                {submitted && <div className="bg-indigo-100 text-indigo-700 px-4 py-2 rounded-lg font-bold">Score: {score} / {questions.length}</div>}
             </div>
-
             <div className="space-y-8 pb-12">
                 {questions.map((q, idx) => {
-                    const selected = answers[idx];
-                    const isCorrect = selected === q.a;
-                    const isSelected = selected !== undefined;
-                    let statusClass = "bg-white border-slate-200";
-                    if (submitted) {
-                        if (isCorrect) statusClass = "bg-emerald-50 border-emerald-200";
-                        else if (isSelected && !isCorrect) statusClass = "bg-red-50 border-red-200";
-                    }
-
+                    const sel = answers[idx];
+                    const correct = q.a === idx;
+                    let status = "bg-white border-slate-200";
+                    if (submitted) status = (sel === q.a) ? "bg-emerald-50 border-emerald-200" : (sel !== undefined ? "bg-red-50 border-red-200" : status);
+                    
                     return (
-                        <div key={idx} className={`p-6 rounded-xl border shadow-sm ${statusClass} transition-colors`}>
-                            <div className="font-medium text-lg text-slate-800 mb-4 flex gap-3">
-                                <span className="text-slate-400 font-bold">{idx + 1}.</span>
-                                {q.q}
-                            </div>
+                        <div key={idx} className={`p-6 rounded-xl border shadow-sm ${status}`}>
+                            <div className="font-medium text-lg mb-4 flex gap-3"><span className="text-slate-400 font-bold">{idx + 1}.</span>{q.q}</div>
                             <div className="space-y-2 pl-6">
-                                {q.options.map((opt, oIdx) => {
-                                    const isOptSelected = selected === oIdx;
-                                    const isOptCorrect = q.a === oIdx;
-                                    let btnClass = "hover:bg-slate-50 border-slate-200";
-                                    if (submitted) {
-                                        if (isOptCorrect) btnClass = "bg-emerald-100 border-emerald-300 text-emerald-800 font-bold";
-                                        else if (isOptSelected && !isOptCorrect) btnClass = "bg-red-100 border-red-300 text-red-800";
-                                        else btnClass = "opacity-60 border-slate-200";
-                                    } else {
-                                        if (isOptSelected) btnClass = "bg-indigo-50 border-indigo-400 text-indigo-700 ring-1 ring-indigo-400";
-                                    }
-
-                                    return (
-                                        <button 
-                                            key={oIdx} disabled={submitted}
-                                            onClick={() => setAnswers({...answers, [idx]: oIdx})}
-                                            className={`w-full text-left p-3 rounded-lg border transition flex items-center gap-3 ${btnClass}`}
-                                        >
-                                            <div className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 ${isOptSelected ? 'border-current' : 'border-slate-300'}`}>
-                                                {isOptSelected && <div className="w-2.5 h-2.5 rounded-full bg-current"></div>}
-                                            </div>
-                                            {opt}
-                                        </button>
-                                    )
-                                })}
+                                {q.options.map((opt, oIdx) => (
+                                    <button key={oIdx} disabled={submitted} onClick={() => setAnswers({...answers, [idx]: oIdx})} className={`w-full text-left p-3 rounded-lg border transition flex gap-3 ${submitted ? (oIdx === q.a ? "bg-emerald-100 border-emerald-300 font-bold" : (sel === oIdx ? "bg-red-100 border-red-300" : "opacity-60")) : (sel === oIdx ? "bg-indigo-50 border-indigo-400 ring-1 ring-indigo-400" : "hover:bg-slate-50")}`}>
+                                        <div className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 ${sel === oIdx ? 'border-current' : 'border-slate-300'}`}>{sel === oIdx && <div className="w-2.5 h-2.5 rounded-full bg-current"></div>}</div>
+                                        {opt}
+                                    </button>
+                                ))}
                             </div>
-                            {submitted && (
-                                <div className="mt-4 ml-6 p-3 text-sm bg-white/50 rounded border border-slate-200 text-slate-600">
-                                    <span className="font-bold">Explanation:</span> {q.exp}
-                                </div>
-                            )}
+                            {submitted && <div className="mt-4 ml-6 p-3 text-sm bg-white/50 rounded border text-slate-600"><strong>Explanation:</strong> {q.exp}</div>}
                         </div>
-                    )
+                    );
                 })}
             </div>
-
-            {!submitted && (
-                <div className="sticky bottom-6 flex justify-center">
-                    <button 
-                        onClick={() => setSubmitted(true)}
-                        className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-8 rounded-full shadow-xl hover:shadow-2xl transition transform hover:-translate-y-1 flex items-center gap-2"
-                    >
-                        <CheckCircle size={20}/> Submit Quiz
-                    </button>
-                </div>
-            )}
+            {!submitted && <div className="sticky bottom-6 flex justify-center"><button onClick={() => setSubmitted(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-8 rounded-full shadow-xl transition hover:-translate-y-1">Submit Quiz</button></div>}
         </div>
     );
 };
 
 // --- MAIN APP ---
 export default function App() {
-    const [folders, setFolders] = useState(() => {
-        const saved = localStorage.getItem('studyGenieFolders');
-        return saved ? JSON.parse(saved) : [{ id: 1, name: 'General' }];
-    });
-
+    const [folders, setFolders] = useState(() => JSON.parse(localStorage.getItem('studyGenieFolders')) || [{ id: 1, name: 'General' }]);
     const [decks, setDecks] = useState(() => {
-        const saved = localStorage.getItem('studyGenieData');
-        let initial = saved ? JSON.parse(saved) : [{ id: 101, folderId: 1, title: 'Example Module', content: '', cards: [], quiz: [], mode: 'dashboard' }];
-        return initial.map(d => d.folderId ? d : { ...d, folderId: 1 });
+        const d = JSON.parse(localStorage.getItem('studyGenieData')) || [{ id: 101, folderId: 1, title: 'Example Module' }];
+        return d.map(x => x.folderId ? x : { ...x, folderId: 1 });
     });
-
-    const [userProfile, setUserProfile] = useState(() => {
-        const saved = localStorage.getItem('studyGenieProfile');
-        return saved ? JSON.parse(saved) : { age: '', degree: '' };
-    });
-
-    const [activeDeckId, setActiveDeckId] = useState(decks[0]?.id || null);
+    const [userProfile, setUserProfile] = useState(() => JSON.parse(localStorage.getItem('studyGenieProfile')) || { age: '', degree: '' });
     const [apiKey, setApiKey] = useState(() => localStorage.getItem('geminiKey') || '');
+    
+    // View State
+    const [viewMode, setViewMode] = useState('deck'); // 'deck' or 'folder'
+    const [activeId, setActiveId] = useState(decks[0]?.id || null); // ID of active deck or folder
     const [showSettings, setShowSettings] = useState(false);
 
     useEffect(() => {
@@ -735,116 +651,59 @@ export default function App() {
         localStorage.setItem('geminiKey', apiKey);
     }, [folders, decks, userProfile, apiKey]);
 
-    const activeDeck = decks.find(d => d.id === activeDeckId) || decks[0];
+    const activeDeck = viewMode === 'deck' ? decks.find(d => d.id === activeId) : null;
+    const activeFolder = viewMode === 'folder' ? folders.find(f => f.id === activeId) : null;
 
-    const updateDeck = (updatedDeck) => {
-        setDecks(decks.map(d => d.id === updatedDeck.id ? updatedDeck : d));
-    };
-
-    const addFolder = () => {
-        const name = prompt("Enter folder name:");
-        if (name) setFolders([...folders, { id: Date.now(), name }]);
-    };
-
-    const deleteFolder = (folderId) => {
-        if (confirm("Delete folder?")) {
-            setDecks(decks.filter(d => d.folderId !== folderId));
-            setFolders(folders.filter(f => f.id !== folderId));
-            if (activeDeck?.folderId === folderId) setActiveDeckId(null);
-        }
-    };
-
-    const addDeck = (folderId) => {
-        const newId = Date.now();
-        setDecks([...decks, { id: newId, folderId, title: 'New Module', content: '', cards: [], quiz: [], mode: 'dashboard' }]);
-        setActiveDeckId(newId);
-    };
-
-    const deleteDeck = (id) => {
-        if(confirm("Delete module?")) {
-            const newDecks = decks.filter(d => d.id !== id);
-            setDecks(newDecks);
-            if (activeDeckId === id) setActiveDeckId(newDecks[0]?.id || null);
-        }
-    };
+    // Actions
+    const updateDeck = (d) => setDecks(decks.map(x => x.id === d.id ? d : x));
+    const updateFolder = (f) => setFolders(folders.map(x => x.id === f.id ? f : x));
+    
+    const addFolder = () => { const n = prompt("Name:"); if(n) setFolders([...folders, { id: Date.now(), name: n }]); };
+    const deleteFolder = (id) => { if(confirm("Delete folder?")) { setDecks(decks.filter(d => d.folderId !== id)); setFolders(folders.filter(f => f.id !== id)); setActiveId(null); }};
+    const addDeck = (fid) => { const nid = Date.now(); setDecks([...decks, { id: nid, folderId: fid, title: 'New Module', mode: 'dashboard' }]); setViewMode('deck'); setActiveId(nid); };
+    const deleteDeck = (id) => { if(confirm("Delete module?")) { const rem = decks.filter(d => d.id !== id); setDecks(rem); if(activeId === id) setActiveId(rem[0]?.id || null); }};
 
     return (
         <div className="flex h-screen bg-[#f8fafc] font-sans text-slate-900">
             <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
             
             <Sidebar 
-                folders={folders} decks={decks} activeDeckId={activeDeckId}
-                onSelectDeck={(id) => {
-                    const d = decks.find(deck => deck.id === id);
-                    if(d) updateDeck({...d, mode: 'dashboard'});
-                    setActiveDeckId(id);
-                }}
-                onAddFolder={addFolder} onDeleteFolder={deleteFolder}
-                onAddDeck={addDeck} onDeleteDeck={deleteDeck}
+                folders={folders} decks={decks} activeId={activeId} viewMode={viewMode}
+                onSelectDeck={(id) => { setViewMode('deck'); setActiveId(id); if(decks.find(d=>d.id===id)) updateDeck({...decks.find(d=>d.id===id), mode: 'dashboard'}); }}
+                onSelectFolder={(id) => { setViewMode('folder'); setActiveId(id); }}
+                onAddFolder={addFolder} onDeleteFolder={deleteFolder} onAddDeck={addDeck} onDeleteDeck={deleteDeck}
                 onSettings={() => setShowSettings(true)}
             />
             
             <main className="flex-1 overflow-y-auto custom-scroll relative bg-[#f8fafc]">
-                {activeDeck ? (
+                {viewMode === 'folder' && activeFolder && (
+                    <FolderDashboard folder={activeFolder} decks={decks.filter(d => d.folderId === activeFolder.id)} onUpdateFolder={updateFolder} apiKey={apiKey} />
+                )}
+
+                {viewMode === 'deck' && activeDeck && (
                     <>
-                        {activeDeck.mode === 'dashboard' && <Dashboard deck={activeDeck} onUpdateDeck={updateDeck} apiKey={apiKey} userProfile={userProfile} />}
+                        {activeDeck.mode === 'dashboard' && <ModuleDashboard deck={activeDeck} onUpdateDeck={updateDeck} apiKey={apiKey} userProfile={userProfile} />}
                         {activeDeck.mode === 'flashcards' && <FlashcardStudy cards={activeDeck.cards} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} apiKey={apiKey} />}
                         {activeDeck.mode === 'quiz' && <QuizMode questions={activeDeck.quiz} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} />}
                     </>
-                ) : (
-                    <div className="flex flex-col items-center justify-center h-full text-slate-400">
-                        <BookOpen size={48} className="mb-4 opacity-50"/>
-                        <p className="text-lg font-medium">Select or create a module to start studying.</p>
-                    </div>
                 )}
+
+                {!activeDeck && !activeFolder && <div className="flex h-full items-center justify-center text-slate-400"><BookOpen size={48} className="opacity-50"/></div>}
             </main>
 
             {showSettings && (
                 <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
                     <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md">
-                        <div className="flex justify-between items-center mb-6">
-                            <h3 className="font-bold text-lg flex items-center gap-2"><Settings size={20}/> Settings</h3>
-                            <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-slate-600"><XCircle size={24}/></button>
-                        </div>
-                        <div className="space-y-5">
-                            <div>
-                                <label className="block text-sm font-semibold text-slate-700 mb-1">Gemini API Key</label>
-                                <input 
-                                    type="password" value={apiKey} 
-                                    onChange={(e) => setApiKey(e.target.value)}
-                                    placeholder="AIzaSy..."
-                                    className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                                />
-                                <p className="text-xs text-slate-500 mt-1">Get your free key from Google AI Studio.</p>
-                            </div>
-                            
-                            <div className="pt-4 border-t border-slate-100">
-                                <h4 className="text-sm font-bold text-slate-800 mb-3 flex items-center gap-2"><GraduationCap size={16}/> User Profile</h4>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <div>
-                                        <label className="block text-xs font-medium text-slate-600 mb-1">Age</label>
-                                        <input 
-                                            type="number" value={userProfile.age} 
-                                            onChange={(e) => setUserProfile({...userProfile, age: e.target.value})}
-                                            className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-indigo-500"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-medium text-slate-600 mb-1">Degree / Level</label>
-                                        <input 
-                                            type="text" value={userProfile.degree} 
-                                            onChange={(e) => setUserProfile({...userProfile, degree: e.target.value})}
-                                            placeholder="e.g. BSc Biology"
-                                            className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-indigo-500"
-                                        />
-                                    </div>
+                        <div className="flex justify-between items-center mb-6"><h3 className="font-bold text-lg">Settings</h3><button onClick={() => setShowSettings(false)}><XCircle/></button></div>
+                        <div className="space-y-4">
+                            <div><label className="text-sm font-bold">API Key</label><input type="password" value={apiKey} onChange={e=>setApiKey(e.target.value)} className="w-full p-2 border rounded"/></div>
+                            <div className="pt-4 border-t"><h4 className="font-bold mb-2">Profile</h4>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <input placeholder="Age" type="number" value={userProfile.age} onChange={e=>setUserProfile({...userProfile, age: e.target.value})} className="p-2 border rounded"/>
+                                    <input placeholder="Degree" value={userProfile.degree} onChange={e=>setUserProfile({...userProfile, degree: e.target.value})} className="p-2 border rounded"/>
                                 </div>
-                                <p className="text-xs text-slate-500 mt-2">The AI will adjust questions to match your level.</p>
                             </div>
-
-                            <button onClick={() => setShowSettings(false)} className="w-full bg-indigo-600 text-white font-medium py-2 rounded hover:bg-indigo-700">
-                                Save Settings
-                            </button>
+                            <button onClick={() => setShowSettings(false)} className="w-full bg-indigo-600 text-white font-bold py-2 rounded">Save</button>
                         </div>
                     </div>
                 </div>
