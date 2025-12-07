@@ -4,7 +4,7 @@ import {
     Plus, Trash2, GraduationCap, FileText, Sparkles, 
     RotateCw, CheckCircle, XCircle, Folder, ChevronDown,
     Mic, Presentation, BookOpenText, PieChart, AlertCircle,
-    LayoutDashboard, Image as ImageIcon, X, FileType, LogOut, Lock, Mail, Edit3
+    LayoutDashboard, Image as ImageIcon, X, FileType, LogOut, Lock, Mail, Edit3, Edit2
 } from 'lucide-react';
 
 // --- UTILS ---
@@ -166,7 +166,7 @@ const generateContent = async (apiKey, prompt, context, systemInstruction, attac
 
 // --- APP COMPONENTS ---
 
-const Sidebar = ({ folders, decks, activeId, viewMode, onSelectDeck, onSelectFolder, onAddFolder, onDeleteFolder, onAddDeck, onDeleteDeck, onSettings }) => {
+const Sidebar = ({ folders, decks, activeId, viewMode, onSelectDeck, onSelectFolder, onAddFolder, onDeleteFolder, onRenameFolder, onAddDeck, onDeleteDeck, onSettings }) => {
     const [expandedFolders, setExpandedFolders] = useState({});
 
     const toggleFolder = (folderId) => {
@@ -183,7 +183,7 @@ const Sidebar = ({ folders, decks, activeId, viewMode, onSelectDeck, onSelectFol
     }, [activeId, viewMode, decks]);
 
     return (
-        <div className="w-full md:w-64 bg-slate-900 text-white flex flex-col h-screen fixed md:relative z-20 shadow-xl border-r border-slate-800">
+        <div className="w-full md:w-72 bg-slate-900 text-white flex flex-col h-screen fixed md:relative z-20 shadow-xl border-r border-slate-800">
             <div className="p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
                 <h1 className="font-bold text-xl flex items-center gap-2">
                     <GraduationCap className="text-indigo-400" /> StudyGenie
@@ -196,14 +196,17 @@ const Sidebar = ({ folders, decks, activeId, viewMode, onSelectDeck, onSelectFol
                     <div key={folder.id}>
                         <div className="flex items-center justify-between group mb-2 select-none">
                             <div 
-                                className="flex items-center gap-2 cursor-pointer hover:text-indigo-300 transition-colors flex-1" 
+                                className="flex items-center gap-2 cursor-pointer hover:text-indigo-300 transition-colors flex-1 overflow-hidden" 
                                 onClick={() => toggleFolder(folder.id)}
                             >
-                                {expandedFolders[folder.id] ? <ChevronDown size={16} className="text-slate-500"/> : <ChevronRight size={16} className="text-slate-500"/>}
-                                <Folder size={16} className="text-indigo-400 fill-indigo-400/20"/>
+                                {expandedFolders[folder.id] ? <ChevronDown size={16} className="text-slate-500 flex-shrink-0"/> : <ChevronRight size={16} className="text-slate-500 flex-shrink-0"/>}
+                                <Folder size={16} className="text-indigo-400 fill-indigo-400/20 flex-shrink-0"/>
                                 <span className="font-semibold text-sm truncate">{folder.name}</span>
                             </div>
-                            <button onClick={(e) => { e.stopPropagation(); onDeleteFolder(folder.id); }} className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-red-400 transition p-1"><Trash2 size={14}/></button>
+                            <div className="flex items-center opacity-0 group-hover:opacity-100 transition gap-1">
+                                <button onClick={(e) => { e.stopPropagation(); onRenameFolder(folder); }} className="text-slate-500 hover:text-indigo-400 p-1" title="Rename Folder"><Edit2 size={12}/></button>
+                                <button onClick={(e) => { e.stopPropagation(); onDeleteFolder(folder.id); }} className="text-slate-500 hover:text-red-400 p-1" title="Delete Folder"><Trash2 size={12}/></button>
+                            </div>
                         </div>
 
                         {expandedFolders[folder.id] && (
@@ -370,6 +373,48 @@ const ManageModal = ({ type, items, onClose, onDeleteItem, onDeleteAll }) => {
     );
 };
 
+// --- NAME INPUT MODAL ---
+const NameModal = ({ isOpen, type, initialValue, onClose, onSave }) => {
+    const [value, setValue] = useState(initialValue);
+    const inputRef = useRef(null);
+
+    useEffect(() => {
+        if (isOpen) {
+            setValue(initialValue);
+            setTimeout(() => inputRef.current?.focus(), 100);
+        }
+    }, [isOpen, initialValue]);
+
+    if (!isOpen) return null;
+
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        if (value.trim()) onSave(value.trim());
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
+                <h3 className="font-bold text-lg text-slate-800 mb-4">{type === 'create' ? 'New Folder' : 'Rename Folder'}</h3>
+                <form onSubmit={handleSubmit}>
+                    <input 
+                        ref={inputRef}
+                        type="text" 
+                        value={value} 
+                        onChange={(e) => setValue(e.target.value)}
+                        className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none mb-4 text-slate-800"
+                        placeholder="Folder Name"
+                    />
+                    <div className="flex gap-2 justify-end">
+                        <button type="button" onClick={onClose} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition text-sm">Cancel</button>
+                        <button type="submit" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition text-sm font-bold">Save</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
 
 const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
     const [isGenerating, setIsGenerating] = useState(false);
@@ -380,7 +425,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
     const fileInputRef = useRef(null);
     const [attachment, setAttachment] = useState(null);
     
-    // NEW: Management Modal State
+    // Management Modal State
     const [manageMode, setManageMode] = useState(null); // 'flashcards' | 'quiz' | null
 
     const [inputs, setInputs] = useState({ notes: "", transcript: "", slides: "" });
@@ -702,6 +747,9 @@ export default function App() {
     const [viewMode, setViewMode] = useState('deck'); 
     const [activeId, setActiveId] = useState(decks[0]?.id || null);
     const [showSettings, setShowSettings] = useState(false);
+    
+    // Name Modal State
+    const [nameModal, setNameModal] = useState({ isOpen: false, type: '', folder: null, value: '' });
 
     useEffect(() => {
         localStorage.setItem('studyGenieFolders', JSON.stringify(folders));
@@ -716,7 +764,19 @@ export default function App() {
     const updateDeck = (d) => setDecks(decks.map(x => x.id === d.id ? d : x));
     const updateFolder = (f) => setFolders(folders.map(x => x.id === f.id ? f : x));
     
-    const addFolder = () => { const n = prompt("Name:"); if(n) setFolders([...folders, { id: Date.now(), name: n }]); };
+    // New Folder / Rename Logic
+    const openAddFolder = () => setNameModal({ isOpen: true, type: 'create', folder: null, value: '' });
+    const openRenameFolder = (folder) => setNameModal({ isOpen: true, type: 'rename', folder: folder, value: folder.name });
+
+    const handleSaveName = (name) => {
+        if (nameModal.type === 'create') {
+            setFolders([...folders, { id: Date.now(), name }]);
+        } else {
+            setFolders(folders.map(f => f.id === nameModal.folder.id ? { ...f, name } : f));
+        }
+        setNameModal({ isOpen: false, type: '', folder: null, value: '' });
+    };
+
     const deleteFolder = (id) => { if(confirm("Delete folder?")) { setDecks(decks.filter(d => d.folderId !== id)); setFolders(folders.filter(f => f.id !== id)); setActiveId(null); }};
     const addDeck = (fid) => { const nid = Date.now(); setDecks([...decks, { id: nid, folderId: fid, title: 'New Module', mode: 'dashboard' }]); setViewMode('deck'); setActiveId(nid); };
     const deleteDeck = (id) => { if(confirm("Delete module?")) { const rem = decks.filter(d => d.id !== id); setDecks(rem); if(activeId === id) setActiveId(rem[0]?.id || null); }};
@@ -728,7 +788,8 @@ export default function App() {
                 folders={folders} decks={decks} activeId={activeId} viewMode={viewMode}
                 onSelectDeck={(id) => { setViewMode('deck'); setActiveId(id); if(decks.find(d=>d.id===id)) updateDeck({...decks.find(d=>d.id===id), mode: 'dashboard'}); }}
                 onSelectFolder={(id) => { setViewMode('folder'); setActiveId(id); }}
-                onAddFolder={addFolder} onDeleteFolder={deleteFolder} onAddDeck={addDeck} onDeleteDeck={deleteDeck}
+                onAddFolder={openAddFolder} onDeleteFolder={deleteFolder} onRenameFolder={openRenameFolder} 
+                onAddDeck={addDeck} onDeleteDeck={deleteDeck}
                 onSettings={() => setShowSettings(true)}
             />
             <main className="flex-1 overflow-y-auto custom-scroll relative bg-[#f8fafc]">
@@ -740,8 +801,19 @@ export default function App() {
                         {activeDeck.mode === 'quiz' && <QuizMode questions={activeDeck.quiz} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} />}
                     </>
                 )}
+
                 {!activeDeck && !activeFolder && <div className="flex h-full items-center justify-center text-slate-400"><BookOpen size={48} className="opacity-50"/></div>}
             </main>
+
+            {/* Name Input Modal */}
+            <NameModal 
+                isOpen={nameModal.isOpen}
+                type={nameModal.type}
+                initialValue={nameModal.value}
+                onClose={() => setNameModal({ ...nameModal, isOpen: false })}
+                onSave={handleSaveName}
+            />
+
             {showSettings && (
                 <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
                     <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md">
