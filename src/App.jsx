@@ -60,101 +60,13 @@ const getCardStatus = (card) => {
     const now = Date.now();
     if (card.nextReview <= now) return { label: 'Due', color: 'bg-orange-100 text-orange-700 border-orange-200' };
     
-    // If interval > 21 days, it's considered Mastered/Mature
-    if (card.interval > 21) return { label: 'Mastered', color: 'bg-emerald-100 text-emerald-700 border-emerald-200' };
+    const oneDay = 24 * 60 * 60 * 1000;
+    if (card.nextReview > now + (3 * oneDay)) return { label: 'Mastered', color: 'bg-emerald-100 text-emerald-700 border-emerald-200' };
     
     return { label: 'Learning', color: 'bg-yellow-100 text-yellow-700 border-yellow-200' };
 };
 
-// --- ANKI ALGORITHM (SM-2 IMPROVED) ---
-const calculateAnki = (card, rating) => {
-    // Defaults for new cards
-    const ease = card.ease || 2.5;
-    const interval = card.interval || 0;
-    const step = card.step || 0; // 0 = 1min, 1 = 10min (Learning steps)
-    const status = card.status || 'learning'; // 'learning', 'review', 'relearning'
-
-    const now = Date.now();
-    let newEase = ease;
-    let newInterval = interval;
-    let newStep = step;
-    let newStatus = status;
-    let nextReviewTime = now;
-
-    // --- LEARNING PHASE ---
-    if (status === 'learning' || status === 'relearning') {
-        if (rating === 'again') {
-            newStep = 0;
-            nextReviewTime = now + (1 * 60 * 1000); // 1 min
-        } else if (rating === 'hard') {
-            // Repeat current step
-            const stepMinutes = newStep === 0 ? 1 : 10;
-            nextReviewTime = now + (stepMinutes * 60 * 1000); 
-        } else if (rating === 'good') {
-            if (newStep === 0) {
-                newStep = 1;
-                nextReviewTime = now + (10 * 60 * 1000); // 10 min
-            } else {
-                // Graduate
-                newStatus = 'review';
-                newInterval = 1; // 1 day
-                nextReviewTime = now + (newInterval * 24 * 60 * 60 * 1000);
-            }
-        } else if (rating === 'easy') {
-            // Graduate immediately
-            newStatus = 'review';
-            newInterval = 4; // 4 days (Easy bonus)
-            nextReviewTime = now + (newInterval * 24 * 60 * 60 * 1000);
-        }
-    } 
-    // --- REVIEW PHASE (Graduated) ---
-    else if (status === 'review') {
-        if (rating === 'again') {
-            newStatus = 'relearning';
-            newStep = 0;
-            newEase = Math.max(1.3, ease - 0.20); // Decrease ease by 20%
-            newInterval = Math.max(1, newInterval * 0.0); // Reset interval (simplified lapse)
-            nextReviewTime = now + (1 * 60 * 1000); // 1 min relearning step
-        } else if (rating === 'hard') {
-            newEase = Math.max(1.3, ease - 0.15); // Decrease ease by 15%
-            newInterval = Math.max(1, newInterval * 1.2); // 1.2x interval
-            nextReviewTime = now + (newInterval * 24 * 60 * 60 * 1000);
-        } else if (rating === 'good') {
-            newInterval = Math.max(1, newInterval * ease); // Interval * Ease
-            nextReviewTime = now + (newInterval * 24 * 60 * 60 * 1000);
-        } else if (rating === 'easy') {
-            newEase = ease + 0.15; // Increase ease by 15%
-            newInterval = Math.max(1, newInterval * ease * 1.3); // Interval * Ease * EasyBonus (1.3)
-            nextReviewTime = now + (newInterval * 24 * 60 * 60 * 1000);
-        }
-    }
-
-    return {
-        ...card,
-        ease: newEase,
-        interval: newInterval,
-        step: newStep,
-        status: newStatus,
-        nextReview: nextReviewTime,
-        lastReviewed: now
-    };
-};
-
-// Helper to format button labels
-const getButtonLabel = (card, rating) => {
-    const nextState = calculateAnki(card || {}, rating);
-    const diff = nextState.nextReview - Date.now();
-    
-    // Format duration
-    const minutes = Math.round(diff / 60000);
-    if (minutes < 60) return `${minutes}m`;
-    const hours = Math.round(minutes / 60);
-    if (hours < 24) return `${hours}h`;
-    const days = Math.round(hours / 24);
-    return `${days}d`;
-};
-
-// --- DATA SANITIZER ---
+// --- DATA SANITIZER (PREVENTS CRASHES) ---
 const validateAndFixData = (data, type) => {
     if (!Array.isArray(data)) return [];
     
@@ -164,18 +76,18 @@ const validateAndFixData = (data, type) => {
             return {
                 q: String(item.q || "Error: Question missing"),
                 a: String(item.a || "Error: Answer missing"),
-                nextReview: item.nextReview || null,
-                // Ensure SRS fields exist
-                ease: item.ease || 2.5,
-                interval: item.interval || 0,
-                status: item.status || 'learning'
+                nextReview: item.nextReview || null 
             };
         }
         // Fix MCQs
         if (type === 'mcq') {
             let options = item.options;
-            if (!options || !Array.isArray(options)) options = ["True", "False"]; 
-            options = options.map(opt => String(opt || "Option missing"));
+            if (!options || !Array.isArray(options)) {
+                options = ["True", "False"]; 
+            }
+            // Ensure all options are strings to prevent "Objects are not valid" error
+            options = options.map(opt => String(opt));
+            
             return {
                 q: String(item.q || "Error: Question missing"),
                 options: options,
@@ -248,10 +160,10 @@ const FormattedText = ({ text, className = "" }) => {
         }
     }); 
 
-    if (!text) return null;
+    if (text === null || text === undefined) return null;
 
     const processText = (str) => {
-        if (typeof str !== 'string') return str;
+        if (typeof str !== 'string') return String(str); // Force string to prevent object errors
         return str
             .replace(/ewline/g, '<br/>') 
             .replace(/\\newline/g, '<br/>') 
@@ -301,7 +213,6 @@ const generateContent = async (apiKey, prompt, context, systemInstruction, attac
                 body: JSON.stringify({
                     contents: [{ parts: contentsPart }],
                     system_instruction: { parts: [{ text: fullSystemPrompt }] },
-                    // FORCE JSON MODE
                     generationConfig: {
                         responseMimeType: "application/json"
                     }
@@ -328,10 +239,72 @@ const generateContent = async (apiKey, prompt, context, systemInstruction, attac
     }
 };
 
-// ... Sidebar, AuthPage, FolderDashboard, ManageModal, NameModal are same ...
+// --- AUTH COMPONENT ---
+const AuthPage = () => {
+    const [isLogin, setIsLogin] = useState(true);
+    const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
+    const [error, setError] = useState("");
+    const [loading, setLoading] = useState(false);
 
-// --- APP COMPONENTS ---
+    const handleAuth = async (e) => {
+        e.preventDefault();
+        setError("");
+        setLoading(true);
+        try {
+            if (isLogin) {
+                await signInWithEmailAndPassword(auth, email, password);
+            } else {
+                await createUserWithEmailAndPassword(auth, email, password);
+            }
+        } catch (err) {
+            setError(err.message.replace("Firebase: ", ""));
+        } finally {
+            setLoading(false);
+        }
+    };
 
+    return (
+        <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-8">
+                <div className="text-center mb-8">
+                    <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-indigo-100 text-indigo-600 mb-4">
+                        <GraduationCap size={24} />
+                    </div>
+                    <h1 className="text-2xl font-bold text-slate-900">Welcome to StudyGenie</h1>
+                    <p className="text-slate-500 mt-2">Your AI-powered study companion.</p>
+                </div>
+                <form onSubmit={handleAuth} className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+                        <div className="relative">
+                            <Mail className="absolute left-3 top-3 text-slate-400" size={18} />
+                            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="student@university.edu" required />
+                        </div>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
+                        <div className="relative">
+                            <Lock className="absolute left-3 top-3 text-slate-400" size={18} />
+                            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="••••••••" required />
+                        </div>
+                    </div>
+                    {error && <div className="text-red-500 text-sm bg-red-50 p-3 rounded-lg flex items-center gap-2"><AlertCircle size={14}/> {error}</div>}
+                    <button type="submit" disabled={loading} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70">
+                        {loading ? <RotateCw className="animate-spin" size={20}/> : (isLogin ? "Sign In" : "Create Account")}
+                    </button>
+                </form>
+                <div className="mt-6 text-center">
+                    <button onClick={() => setIsLogin(!isLogin)} className="text-sm text-indigo-600 hover:text-indigo-800 font-medium">
+                        {isLogin ? "Need an account? Sign Up" : "Already have an account? Sign In"}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// --- SIDEBAR COMPONENT ---
 const Sidebar = ({ folders, decks, activeId, viewMode, onSelectDeck, onSelectFolder, onAddFolder, onDeleteFolder, onRenameFolder, onAddDeck, onDeleteDeck, onSettings }) => {
     const [expandedFolders, setExpandedFolders] = useState({});
 
@@ -402,70 +375,6 @@ const Sidebar = ({ folders, decks, activeId, viewMode, onSelectDeck, onSelectFol
             
             <div className="p-4 border-t border-slate-800 shrink-0">
                 <button onClick={onAddFolder} className="w-full flex items-center justify-center gap-2 p-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-sm text-slate-300 hover:text-white transition font-medium border border-slate-700"><Plus size={16} /> New Folder</button>
-            </div>
-        </div>
-    );
-};
-
-const AuthPage = () => {
-    const [isLogin, setIsLogin] = useState(true);
-    const [email, setEmail] = useState("");
-    const [password, setPassword] = useState("");
-    const [error, setError] = useState("");
-    const [loading, setLoading] = useState(false);
-
-    const handleAuth = async (e) => {
-        e.preventDefault();
-        setError("");
-        setLoading(true);
-        try {
-            if (isLogin) {
-                await signInWithEmailAndPassword(auth, email, password);
-            } else {
-                await createUserWithEmailAndPassword(auth, email, password);
-            }
-        } catch (err) {
-            setError(err.message.replace("Firebase: ", ""));
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    return (
-        <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-8">
-                <div className="text-center mb-8">
-                    <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-indigo-100 text-indigo-600 mb-4">
-                        <GraduationCap size={24} />
-                    </div>
-                    <h1 className="text-2xl font-bold text-slate-900">Welcome to StudyGenie</h1>
-                    <p className="text-slate-500 mt-2">Your AI-powered study companion.</p>
-                </div>
-                <form onSubmit={handleAuth} className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
-                        <div className="relative">
-                            <Mail className="absolute left-3 top-3 text-slate-400" size={18} />
-                            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="student@university.edu" required />
-                        </div>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
-                        <div className="relative">
-                            <Lock className="absolute left-3 top-3 text-slate-400" size={18} />
-                            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="••••••••" required />
-                        </div>
-                    </div>
-                    {error && <div className="text-red-500 text-sm bg-red-50 p-3 rounded-lg flex items-center gap-2"><AlertCircle size={14}/> {error}</div>}
-                    <button type="submit" disabled={loading} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70">
-                        {loading ? <RotateCw className="animate-spin" size={20}/> : (isLogin ? "Sign In" : "Create Account")}
-                    </button>
-                </form>
-                <div className="mt-6 text-center">
-                    <button onClick={() => setIsLogin(!isLogin)} className="text-sm text-indigo-600 hover:text-indigo-800 font-medium">
-                        {isLogin ? "Need an account? Sign Up" : "Already have an account? Sign In"}
-                    </button>
-                </div>
             </div>
         </div>
     );
