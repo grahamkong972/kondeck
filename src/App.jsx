@@ -5,7 +5,7 @@ import {
     RotateCw, CheckCircle, XCircle, Folder, ChevronDown,
     Mic, Presentation, BookOpenText, PieChart, AlertCircle,
     LayoutDashboard, Image as ImageIcon, X, FileType, LogOut, Lock, Mail, Edit3, Edit2,
-    Clock, Layers, Zap, Tag, Hash
+    Clock, Layers, Zap, Tag, Hash, Timer, Award
 } from 'lucide-react';
 
 // --- FIREBASE IMPORTS ---
@@ -203,6 +203,8 @@ const generateContent = async (apiKey, prompt, context, systemInstruction, attac
     }
 };
 
+// ... Sidebar, AuthPage, FolderDashboard, ModuleDashboard, ManageModal, NameModal are same as previous ...
+
 // --- APP COMPONENTS ---
 
 const Sidebar = ({ folders, decks, activeId, viewMode, onSelectDeck, onSelectFolder, onAddFolder, onDeleteFolder, onRenameFolder, onAddDeck, onDeleteDeck, onSettings }) => {
@@ -275,6 +277,70 @@ const Sidebar = ({ folders, decks, activeId, viewMode, onSelectDeck, onSelectFol
             
             <div className="p-4 border-t border-slate-800 shrink-0">
                 <button onClick={onAddFolder} className="w-full flex items-center justify-center gap-2 p-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-sm text-slate-300 hover:text-white transition font-medium border border-slate-700"><Plus size={16} /> New Folder</button>
+            </div>
+        </div>
+    );
+};
+
+const AuthPage = () => {
+    const [isLogin, setIsLogin] = useState(true);
+    const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
+    const [error, setError] = useState("");
+    const [loading, setLoading] = useState(false);
+
+    const handleAuth = async (e) => {
+        e.preventDefault();
+        setError("");
+        setLoading(true);
+        try {
+            if (isLogin) {
+                await signInWithEmailAndPassword(auth, email, password);
+            } else {
+                await createUserWithEmailAndPassword(auth, email, password);
+            }
+        } catch (err) {
+            setError(err.message.replace("Firebase: ", ""));
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-8">
+                <div className="text-center mb-8">
+                    <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-indigo-100 text-indigo-600 mb-4">
+                        <GraduationCap size={24} />
+                    </div>
+                    <h1 className="text-2xl font-bold text-slate-900">Welcome to StudyGenie</h1>
+                    <p className="text-slate-500 mt-2">Your AI-powered study companion.</p>
+                </div>
+                <form onSubmit={handleAuth} className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+                        <div className="relative">
+                            <Mail className="absolute left-3 top-3 text-slate-400" size={18} />
+                            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="student@university.edu" required />
+                        </div>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
+                        <div className="relative">
+                            <Lock className="absolute left-3 top-3 text-slate-400" size={18} />
+                            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="••••••••" required />
+                        </div>
+                    </div>
+                    {error && <div className="text-red-500 text-sm bg-red-50 p-3 rounded-lg flex items-center gap-2"><AlertCircle size={14}/> {error}</div>}
+                    <button type="submit" disabled={loading} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70">
+                        {loading ? <RotateCw className="animate-spin" size={20}/> : (isLogin ? "Sign In" : "Create Account")}
+                    </button>
+                </form>
+                <div className="mt-6 text-center">
+                    <button onClick={() => setIsLogin(!isLogin)} className="text-sm text-indigo-600 hover:text-indigo-800 font-medium">
+                        {isLogin ? "Need an account? Sign Up" : "Already have an account? Sign In"}
+                    </button>
+                </div>
             </div>
         </div>
     );
@@ -358,119 +424,10 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, apiKey }) => {
     );
 };
 
-// --- MANAGE CONTENT MODAL ---
-const ManageModal = ({ type, items, onClose, onDeleteItem, onDeleteAll }) => {
-    return (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col">
-                <div className="flex justify-between items-center p-6 border-b">
-                    <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
-                        {type === 'flashcards' ? <BookOpen className="text-indigo-500"/> : <Brain className="text-emerald-500"/>}
-                        Manage {type === 'flashcards' ? 'Flashcards' : 'Quiz Questions'}
-                    </h3>
-                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition"><X size={24}/></button>
-                </div>
-                
-                <div className="flex-1 overflow-y-auto p-4 custom-scroll">
-                    {items.length === 0 ? (
-                        <div className="text-center text-slate-400 py-12">No items to show.</div>
-                    ) : (
-                        <div className="space-y-2">
-                            {items.map((item, i) => {
-                                // Calculate visual status badge for List Item
-                                const status = type === 'flashcards' ? getCardStatus(item) : null;
-                                
-                                return (
-                                    <div key={i} className="flex items-start gap-3 p-3 bg-slate-50 rounded-lg border border-slate-100 group hover:border-slate-300 transition">
-                                        <div className="flex flex-col items-center gap-1 mt-1">
-                                            <span className="text-xs font-bold text-slate-400">{i + 1}.</span>
-                                            {status && (
-                                                <div className={`w-2 h-2 rounded-full ${status.color.replace('text-', 'bg-').split(' ')[0]}`} title={status.label}></div>
-                                            )}
-                                        </div>
-                                        <div className="flex-1 text-sm text-slate-700">
-                                            <div className="font-medium mb-1 flex items-center gap-2">
-                                                <FormattedText text={item.q} />
-                                                {status && <span className={`text-[10px] px-1.5 py-0.5 rounded border ${status.color}`}>{status.label}</span>}
-                                            </div>
-                                            <div className="text-xs text-slate-500 line-clamp-1 opacity-70">
-                                                {type === 'flashcards' ? <FormattedText text={item.a} /> : 'Multiple Choice'}
-                                            </div>
-                                        </div>
-                                        <button 
-                                            onClick={() => onDeleteItem(i)}
-                                            className="text-slate-400 hover:text-red-500 p-1 opacity-0 group-hover:opacity-100 transition"
-                                            title="Delete Item"
-                                        >
-                                            <Trash2 size={16}/>
-                                        </button>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    )}
-                </div>
-
-                <div className="p-4 border-t bg-slate-50 rounded-b-xl flex justify-between items-center">
-                    <span className="text-xs text-slate-500">{items.length} items total</span>
-                    <button 
-                        onClick={onDeleteAll}
-                        className="text-sm text-red-600 hover:text-red-800 font-medium flex items-center gap-2 px-4 py-2 hover:bg-red-50 rounded-lg transition"
-                    >
-                        <Trash2 size={16}/> Delete All
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-};
-
-// --- NAME INPUT MODAL ---
-const NameModal = ({ isOpen, type, initialValue, onClose, onSave }) => {
-    const [value, setValue] = useState(initialValue);
-    const inputRef = useRef(null);
-
-    useEffect(() => {
-        if (isOpen) {
-            setValue(initialValue);
-            setTimeout(() => inputRef.current?.focus(), 100);
-        }
-    }, [isOpen, initialValue]);
-
-    if (!isOpen) return null;
-
-    const handleSubmit = (e) => {
-        e.preventDefault();
-        if (value.trim()) onSave(value.trim());
-    };
-
-    return (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
-                <h3 className="font-bold text-lg text-slate-800 mb-4">{type === 'create' ? 'New Folder' : 'Rename Folder'}</h3>
-                <form onSubmit={handleSubmit}>
-                    <input 
-                        ref={inputRef}
-                        type="text" 
-                        value={value} 
-                        onChange={(e) => setValue(e.target.value)}
-                        className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none mb-4 text-slate-800"
-                        placeholder="Folder Name"
-                    />
-                    <div className="flex gap-2 justify-end">
-                        <button type="button" onClick={onClose} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition text-sm">Cancel</button>
-                        <button type="submit" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition text-sm font-bold">Save</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    );
-};
-
-
 const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
     const [isGenerating, setIsGenerating] = useState(false);
     const [statusMessage, setStatusMessage] = useState("");
+    const [genType, setGenType] = useState("flashcards");
     const [count, setCount] = useState(10);
     const [activeTab, setActiveTab] = useState('notes');
     const fileInputRef = useRef(null);
@@ -526,6 +483,11 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
     const toggleStudyMode = (mode) => {
         onUpdateDeck({ ...deck, studyMode: mode });
     };
+    
+    // Quiz Mode Toggle
+    const toggleQuizMode = (mode) => {
+        onUpdateDeck({ ...deck, quizMode: mode });
+    }
 
     const handleGenerate = async (type) => {
         const hasText = inputs.notes.trim() || inputs.transcript.trim() || inputs.slides.trim();
@@ -692,11 +654,20 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
                                  <BookOpen size={18}/> Study Flashcards
                              </button>
                         </div>
-
-                        <button onClick={() => onUpdateDeck({...deck, mode: 'quiz'})} disabled={!deck.quiz?.length} className="group w-full bg-white border border-slate-200 hover:border-emerald-500 hover:shadow-md p-4 rounded-xl text-left transition disabled:opacity-50">
-                            <div className="flex items-center justify-between mb-1"><span className="font-bold text-slate-800 group-hover:text-emerald-600">Practice Quiz</span><Brain size={20} className="text-emerald-500"/></div>
-                            <p className="text-sm text-slate-500">Test retention.</p>
-                        </button>
+                        
+                        {/* Quiz Mode Toggle & Button */}
+                        <div className="bg-white p-4 rounded-xl border border-slate-200">
+                            <div className="flex justify-between items-center mb-3">
+                                <span className="font-bold text-slate-700">Quiz Mode</span>
+                                <div className="flex bg-slate-100 rounded-lg p-1">
+                                    <button onClick={() => toggleQuizMode('practice')} className={`px-3 py-1 rounded-md text-xs font-bold transition ${(!deck.quizMode || deck.quizMode === 'practice') ? 'bg-white shadow text-emerald-600' : 'text-slate-500'}`}>Practice</button>
+                                    <button onClick={() => toggleQuizMode('exam')} className={`px-3 py-1 rounded-md text-xs font-bold transition ${deck.quizMode === 'exam' ? 'bg-white shadow text-emerald-600' : 'text-slate-500'}`}>Exam</button>
+                                </div>
+                            </div>
+                            <button onClick={() => onUpdateDeck({...deck, mode: 'quiz'})} disabled={!deck.quiz?.length} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                                <Brain size={18}/> Start Quiz
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -714,6 +685,116 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
         </div>
     );
 };
+
+// --- MANAGE CONTENT MODAL ---
+const ManageModal = ({ type, items, onClose, onDeleteItem, onDeleteAll }) => {
+    return (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+                <div className="flex justify-between items-center p-6 border-b">
+                    <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
+                        {type === 'flashcards' ? <BookOpen className="text-indigo-500"/> : <Brain className="text-emerald-500"/>}
+                        Manage {type === 'flashcards' ? 'Flashcards' : 'Quiz Questions'}
+                    </h3>
+                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition"><X size={24}/></button>
+                </div>
+                
+                <div className="flex-1 overflow-y-auto p-4 custom-scroll">
+                    {items.length === 0 ? (
+                        <div className="text-center text-slate-400 py-12">No items to show.</div>
+                    ) : (
+                        <div className="space-y-2">
+                            {items.map((item, i) => {
+                                // Calculate visual status badge for List Item
+                                const status = type === 'flashcards' ? getCardStatus(item) : null;
+                                
+                                return (
+                                    <div key={i} className="flex items-start gap-3 p-3 bg-slate-50 rounded-lg border border-slate-100 group hover:border-slate-300 transition">
+                                        <div className="flex flex-col items-center gap-1 mt-1">
+                                            <span className="text-xs font-bold text-slate-400">{i + 1}.</span>
+                                            {status && (
+                                                <div className={`w-2 h-2 rounded-full ${status.color.replace('text-', 'bg-').split(' ')[0]}`} title={status.label}></div>
+                                            )}
+                                        </div>
+                                        <div className="flex-1 text-sm text-slate-700">
+                                            <div className="font-medium mb-1 flex items-center gap-2">
+                                                <FormattedText text={item.q} />
+                                                {status && <span className={`text-[10px] px-1.5 py-0.5 rounded border ${status.color}`}>{status.label}</span>}
+                                            </div>
+                                            <div className="text-xs text-slate-500 line-clamp-1 opacity-70">
+                                                {type === 'flashcards' ? <FormattedText text={item.a} /> : 'Multiple Choice'}
+                                            </div>
+                                        </div>
+                                        <button 
+                                            onClick={() => onDeleteItem(i)}
+                                            className="text-slate-400 hover:text-red-500 p-1 opacity-0 group-hover:opacity-100 transition"
+                                            title="Delete Item"
+                                        >
+                                            <Trash2 size={16}/>
+                                        </button>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+
+                <div className="p-4 border-t bg-slate-50 rounded-b-xl flex justify-between items-center">
+                    <span className="text-xs text-slate-500">{items.length} items total</span>
+                    <button 
+                        onClick={onDeleteAll}
+                        className="text-sm text-red-600 hover:text-red-800 font-medium flex items-center gap-2 px-4 py-2 hover:bg-red-50 rounded-lg transition"
+                    >
+                        <Trash2 size={16}/> Delete All
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// --- NAME INPUT MODAL ---
+const NameModal = ({ isOpen, type, initialValue, onClose, onSave }) => {
+    const [value, setValue] = useState(initialValue);
+    const inputRef = useRef(null);
+
+    useEffect(() => {
+        if (isOpen) {
+            setValue(initialValue);
+            setTimeout(() => inputRef.current?.focus(), 100);
+        }
+    }, [isOpen, initialValue]);
+
+    if (!isOpen) return null;
+
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        if (value.trim()) onSave(value.trim());
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
+                <h3 className="font-bold text-lg text-slate-800 mb-4">{type === 'create' ? 'New Folder' : 'Rename Folder'}</h3>
+                <form onSubmit={handleSubmit}>
+                    <input 
+                        ref={inputRef}
+                        type="text" 
+                        value={value} 
+                        onChange={(e) => setValue(e.target.value)}
+                        className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none mb-4 text-slate-800"
+                        placeholder="Folder Name"
+                    />
+                    <div className="flex gap-2 justify-end">
+                        <button type="button" onClick={onClose} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition text-sm">Cancel</button>
+                        <button type="submit" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition text-sm font-bold">Save</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
 
 const FlashcardStudy = ({ cards, onBack, apiKey, onUpdateDeck, deck }) => {
     // Determine Mode
@@ -767,11 +848,14 @@ const FlashcardStudy = ({ cards, onBack, apiKey, onUpdateDeck, deck }) => {
     }, [idx, cards]);
 
     // SRS RATING HANDLER
-    const handleRate = (intervalMinutes) => {
+    const handleRate = useCallback((intervalMinutes) => {
+        // Prevent action if no card
+        if (!currentCard) return;
+
         const now = Date.now();
         const nextReview = now + (intervalMinutes * 60 * 1000);
         
-        // Update main deck
+        // Update main deck in Firestore
         const updatedCards = [...cards];
         const cardIndex = currentCard.originalIndex; // Need original index for SRS updates
         if (cardIndex !== undefined) {
@@ -779,11 +863,14 @@ const FlashcardStudy = ({ cards, onBack, apiKey, onUpdateDeck, deck }) => {
              onUpdateDeck({ ...deck, cards: updatedCards });
         }
 
-        // Update Queue
+        // Update Queue for current session
         let newQueue = dueQueue.slice(1);
         if (intervalMinutes < 10) {
              // Re-queue card at end if "Again" or "Hard"
-             if (intervalMinutes === 1) newQueue.push({ ...currentCard, nextReview, originalIndex: cardIndex });
+             // Using a random position in the next 3 cards to prevent immediate repetition if queue > 1
+             const insertPos = Math.min(newQueue.length, Math.floor(Math.random() * 3) + 1);
+             const cardToRequeue = { ...currentCard, nextReview, originalIndex: cardIndex };
+             newQueue.splice(insertPos, 0, cardToRequeue);
         }
         
         setFlipped(false);
@@ -792,17 +879,27 @@ const FlashcardStudy = ({ cards, onBack, apiKey, onUpdateDeck, deck }) => {
         
         if (newQueue.length > 0) setCurrentCard(newQueue[0]);
         else setSessionComplete(true);
-    };
+    }, [currentCard, cards, deck, dueQueue, onUpdateDeck]);
 
     // Keyboard Shortcuts
     useEffect(() => {
         const h = (e) => { 
-            if (e.code === 'Space') { e.preventDefault(); setFlipped(p=>!p); } 
+            if (e.code === 'Space') { 
+                e.preventDefault(); 
+                setFlipped(p=>!p); 
+            } 
             else if (!isSRS && e.code === 'ArrowRight') nextStandard(); 
-            else if (!isSRS && e.code === 'ArrowLeft') prevStandard(); 
+            else if (!isSRS && e.code === 'ArrowLeft') prevStandard();
+            else if (isSRS && flipped) {
+                // Number shortcuts for SRS
+                if (e.key === '1') handleRate(1);      // Again
+                if (e.key === '2') handleRate(10);     // Hard
+                if (e.key === '3') handleRate(1440);   // Good
+                if (e.key === '4') handleRate(5760);   // Easy
+            }
         };
         window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h);
-    }, [isSRS, nextStandard, prevStandard]);
+    }, [isSRS, flipped, nextStandard, prevStandard, handleRate]);
 
     const getHelp = async (type) => {
         if (loadingHelp) return;
@@ -879,16 +976,16 @@ const FlashcardStudy = ({ cards, onBack, apiKey, onUpdateDeck, deck }) => {
                 {isSRS && flipped && (
                     <div className="mt-8 flex gap-3 animate-fade-in-up">
                         <button onClick={() => handleRate(1)} className="flex flex-col items-center px-6 py-3 bg-red-100 hover:bg-red-200 text-red-700 rounded-xl transition border-b-4 border-red-200 hover:border-red-300 active:border-b-0 active:translate-y-1">
-                            <span className="font-bold">Again</span><span className="text-[10px] opacity-70">1m</span>
+                            <span className="font-bold">Again</span><span className="text-[10px] opacity-70">1m (1)</span>
                         </button>
                         <button onClick={() => handleRate(10)} className="flex flex-col items-center px-6 py-3 bg-orange-100 hover:bg-orange-200 text-orange-700 rounded-xl transition border-b-4 border-orange-200 hover:border-orange-300 active:border-b-0 active:translate-y-1">
-                            <span className="font-bold">Hard</span><span className="text-[10px] opacity-70">10m</span>
+                            <span className="font-bold">Hard</span><span className="text-[10px] opacity-70">10m (2)</span>
                         </button>
                         <button onClick={() => handleRate(1440)} className="flex flex-col items-center px-6 py-3 bg-emerald-100 hover:bg-emerald-200 text-emerald-700 rounded-xl transition border-b-4 border-emerald-200 hover:border-emerald-300 active:border-b-0 active:translate-y-1">
-                            <span className="font-bold">Good</span><span className="text-[10px] opacity-70">1d</span>
+                            <span className="font-bold">Good</span><span className="text-[10px] opacity-70">1d (3)</span>
                         </button>
                         <button onClick={() => handleRate(5760)} className="flex flex-col items-center px-6 py-3 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-xl transition border-b-4 border-blue-200 hover:border-blue-300 active:border-b-0 active:translate-y-1">
-                            <span className="font-bold">Easy</span><span className="text-[10px] opacity-70">4d</span>
+                            <span className="font-bold">Easy</span><span className="text-[10px] opacity-70">4d (4)</span>
                         </button>
                     </div>
                 )}
@@ -911,41 +1008,143 @@ const FlashcardStudy = ({ cards, onBack, apiKey, onUpdateDeck, deck }) => {
     );
 };
 
-const QuizMode = ({ questions, onBack }) => {
+const QuizMode = ({ questions, onBack, deck }) => {
+    // Determine Mode
+    const isExam = deck?.quizMode === 'exam';
+
     const [answers, setAnswers] = useState({});
     const [submitted, setSubmitted] = useState(false);
+    const [timeLeft, setTimeLeft] = useState(questions.length * 90); // 1.5 mins per question
+
+    // Calculate Score
     const score = Object.keys(answers).reduce((acc, key) => acc + (answers[key] === questions[key].a ? 1 : 0), 0);
+    const percentage = Math.round((score / questions.length) * 100);
+
+    // Timer Logic for Exam Mode
+    useEffect(() => {
+        if (isExam && !submitted && timeLeft > 0) {
+            const timer = setInterval(() => setTimeLeft(prev => prev - 1), 1000);
+            return () => clearInterval(timer);
+        } else if (timeLeft === 0 && !submitted) {
+            setSubmitted(true); // Auto-submit on time up
+        }
+    }, [isExam, submitted, timeLeft]);
+
+    // Format Time
+    const formatTime = (seconds) => {
+        const m = Math.floor(seconds / 60);
+        const s = seconds % 60;
+        return `${m}:${s < 10 ? '0' : ''}${s}`;
+    };
+
+    // Grade Calculation
+    const getGrade = (pct) => {
+        if (pct >= 85) return { grade: "HD", color: "text-emerald-600", text: "High Distinction" };
+        if (pct >= 75) return { grade: "D", color: "text-blue-600", text: "Distinction" };
+        if (pct >= 65) return { grade: "C", color: "text-indigo-600", text: "Credit" };
+        if (pct >= 50) return { grade: "P", color: "text-orange-600", text: "Pass" };
+        return { grade: "F", color: "text-red-600", text: "Fail" };
+    };
+
+    const grade = getGrade(percentage);
 
     return (
         <div className="max-w-3xl mx-auto p-6">
-            <div className="flex justify-between mb-8 sticky top-0 bg-[#f8fafc] py-4 z-10 border-b">
+            {/* Header */}
+            <div className="flex justify-between items-center mb-8 sticky top-0 bg-[#f8fafc] py-4 z-10 border-b">
                 <button onClick={onBack} className="flex gap-2 text-slate-500 hover:text-indigo-600 font-medium"><ChevronLeft/> Exit</button>
-                {submitted && <div className="bg-indigo-100 text-indigo-700 px-4 py-2 rounded-lg font-bold">Score: {score} / {questions.length}</div>}
+                
+                {isExam && !submitted && (
+                    <div className={`font-mono font-bold text-xl flex items-center gap-2 ${timeLeft < 60 ? 'text-red-600 animate-pulse' : 'text-slate-700'}`}>
+                        <Clock size={20}/> {formatTime(timeLeft)}
+                    </div>
+                )}
+                
+                {submitted && (
+                    <div className="flex items-center gap-3">
+                         {isExam && <div className={`text-xl font-bold ${grade.color}`}>{grade.grade} ({percentage}%)</div>}
+                         {!isExam && <div className="bg-indigo-100 text-indigo-700 px-4 py-2 rounded-lg font-bold">Score: {score} / {questions.length}</div>}
+                    </div>
+                )}
             </div>
+
+            {/* Results Screen for Exam Mode */}
+            {submitted && isExam && (
+                <div className="bg-white p-8 rounded-2xl shadow-lg border border-slate-200 text-center mb-8 animate-fade-in">
+                    <div className="inline-flex p-4 bg-slate-50 rounded-full mb-4">
+                        <Award size={48} className={grade.color} />
+                    </div>
+                    <h2 className="text-3xl font-bold text-slate-800 mb-2">{grade.text}</h2>
+                    <p className="text-slate-500 mb-6">You scored {score} out of {questions.length} ({percentage}%)</p>
+                    <div className="w-full bg-slate-100 h-3 rounded-full overflow-hidden">
+                        <div className={`h-full ${grade.color.replace('text-', 'bg-')}`} style={{ width: `${percentage}%` }}></div>
+                    </div>
+                </div>
+            )}
+
+            {/* Questions List */}
             <div className="space-y-8 pb-12">
                 {questions.map((q, idx) => {
                     const sel = answers[idx];
                     const correct = q.a === idx;
+                    
                     let status = "bg-white border-slate-200";
-                    if (submitted) status = (sel === q.a) ? "bg-emerald-50 border-emerald-200" : (sel !== undefined ? "bg-red-50 border-red-200" : status);
+                    if (submitted) {
+                        status = (sel === q.a) ? "bg-emerald-50 border-emerald-200" : (sel !== undefined ? "bg-red-50 border-red-200" : status);
+                    }
                     
                     return (
                         <div key={idx} className={`p-6 rounded-xl border shadow-sm ${status}`}>
                             <div className="font-medium text-lg mb-4 flex gap-3"><span className="text-slate-400 font-bold">{idx + 1}.</span><FormattedText text={q.q}/></div>
                             <div className="space-y-2 pl-6">
-                                {q.options.map((opt, oIdx) => (
-                                    <button key={oIdx} disabled={submitted} onClick={() => setAnswers({...answers, [idx]: oIdx})} className={`w-full text-left p-3 rounded-lg border transition flex gap-3 ${submitted ? (oIdx === q.a ? "bg-emerald-100 border-emerald-300 font-bold" : (sel === oIdx ? "bg-red-100 border-red-300" : "opacity-60")) : (sel === oIdx ? "bg-indigo-50 border-indigo-400 ring-1 ring-indigo-400" : "hover:bg-slate-50")}`}>
-                                        <div className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 ${sel === oIdx ? 'border-current' : 'border-slate-300'}`}>{sel === oIdx && <div className="w-2.5 h-2.5 rounded-full bg-current"></div>}</div>
-                                        <FormattedText text={opt}/>
-                                    </button>
-                                ))}
+                                {q.options.map((opt, oIdx) => {
+                                    // Visual Logic for Options
+                                    let btnClass = `w-full text-left p-3 rounded-lg border transition flex gap-3 `;
+                                    
+                                    if (submitted) {
+                                        // In Exam Mode, show correct answers ONLY after submission
+                                        // In Practice Mode, highlight immediately
+                                        if (oIdx === q.a) btnClass += "bg-emerald-100 border-emerald-300 font-bold "; 
+                                        else if (sel === oIdx) btnClass += "bg-red-100 border-red-300 "; 
+                                        else btnClass += "opacity-60 ";
+                                    } else {
+                                        // Active State during selection
+                                        btnClass += (sel === oIdx) ? "bg-indigo-50 border-indigo-400 ring-1 ring-indigo-400 " : "hover:bg-slate-50 ";
+                                    }
+
+                                    return (
+                                        <button key={oIdx} disabled={submitted && isExam} onClick={() => setAnswers({...answers, [idx]: oIdx})} className={btnClass}>
+                                            <div className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 ${sel === oIdx ? 'border-current' : 'border-slate-300'}`}>{sel === oIdx && <div className="w-2.5 h-2.5 rounded-full bg-current"></div>}</div>
+                                            <FormattedText text={opt}/>
+                                        </button>
+                                    );
+                                })}
                             </div>
-                            {submitted && <div className="mt-4 ml-6 p-3 text-sm bg-white/50 rounded border text-slate-600"><strong>Explanation:</strong> <FormattedText text={q.exp}/></div>}
+                            
+                            {/* Explanation logic:
+                                - Exam Mode: Show only after submit
+                                - Practice Mode: Show immediately if answer selected
+                            */}
+                            {(!isExam && sel !== undefined) || (isExam && submitted) ? (
+                                <div className="mt-4 ml-6 p-3 text-sm bg-white/50 rounded border text-slate-600 animate-fade-in">
+                                    <strong>Explanation:</strong> <FormattedText text={q.exp}/>
+                                </div>
+                            ) : null}
                         </div>
                     );
                 })}
             </div>
-            {!submitted && <div className="sticky bottom-6 flex justify-center"><button onClick={() => setSubmitted(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-8 rounded-full shadow-xl transition hover:-translate-y-1">Submit Quiz</button></div>}
+            
+            {(!submitted || !isExam) && (
+                <div className="sticky bottom-6 flex justify-center">
+                    <button 
+                        onClick={() => setSubmitted(true)} 
+                        className={`text-white font-bold py-3 px-8 rounded-full shadow-xl transition hover:-translate-y-1 ${isExam ? 'bg-red-600 hover:bg-red-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+                    >
+                        {isExam ? "Finish Exam" : "Submit Quiz"}
+                    </button>
+                </div>
+            )}
         </div>
     );
 };
@@ -1012,7 +1211,7 @@ export default function App() {
                     <>
                         {activeDeck.mode === 'dashboard' && <ModuleDashboard deck={activeDeck} onUpdateDeck={updateDeck} apiKey={apiKey} userProfile={userProfile} />}
                         {activeDeck.mode === 'flashcards' && <FlashcardStudy cards={activeDeck.cards || []} deck={activeDeck} onUpdateDeck={updateDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} apiKey={apiKey} />}
-                        {activeDeck.mode === 'quiz' && <QuizMode questions={activeDeck.quiz || []} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} />}
+                        {activeDeck.mode === 'quiz' && <QuizMode questions={activeDeck.quiz || []} deck={activeDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} />}
                     </>
                 )}
 
