@@ -31,7 +31,22 @@ const fileToBase64 = (file) => {
 const FormattedText = ({ text, className = "" }) => {
     const containerRef = useRef(null);
 
-    // Load KaTeX for Math Rendering
+    // Function to trigger KaTeX rendering
+    const renderMath = () => {
+        if (window.renderMathInElement && containerRef.current) {
+            window.renderMathInElement(containerRef.current, {
+                delimiters: [
+                    {left: "$$", right: "$$", display: true},
+                    {left: "$", right: "$", display: false},
+                    {left: "\\(", right: "\\)", display: false},
+                    {left: "\\[", right: "\\]", display: true}
+                ],
+                throwOnError: false
+            });
+        }
+    };
+
+    // Load KaTeX once, but render on every update
     useEffect(() => {
         if (!window.renderMathInElement) {
             const script = document.createElement('script');
@@ -39,28 +54,14 @@ const FormattedText = ({ text, className = "" }) => {
             script.onload = () => {
                 const autoRender = document.createElement('script');
                 autoRender.src = "https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js";
-                autoRender.onload = () => { 
-                    if (containerRef.current) {
-                        window.renderMathInElement(containerRef.current, {
-                            delimiters: [
-                                {left: "$$", right: "$$", display: true},
-                                {left: "$", right: "$", display: false}
-                            ]
-                        }); 
-                    }
-                };
+                autoRender.onload = () => renderMath();
                 document.head.appendChild(autoRender);
             };
             document.head.appendChild(script);
-        } else if (containerRef.current) {
-            window.renderMathInElement(containerRef.current, {
-                delimiters: [
-                    {left: "$$", right: "$$", display: true},
-                    {left: "$", right: "$", display: false}
-                ]
-            });
+        } else {
+            renderMath();
         }
-    }, [text]);
+    }); // No dependency array: runs on every render to fix "revert to raw" issue
 
     if (!text) return null;
 
@@ -69,7 +70,7 @@ const FormattedText = ({ text, className = "" }) => {
         
         let processed = str
             // 1. Aggressive Newline Fixes
-            .replace(/ewline/g, '<br/>') // Fix specific artifact "ewline"
+            .replace(/ewline/g, '<br/>') 
             .replace(/\\newline/g, '<br/>') 
             .replace(/\\\\n/g, '<br/>') 
             .replace(/\\n/g, '<br/>')   
@@ -84,7 +85,7 @@ const FormattedText = ({ text, className = "" }) => {
             // 4. Markdown Bolding (**...** -> <strong>...</strong>)
             .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
             
-            // 5. Clean up "Label:$" artifacts where the AI puts $ after a colon
+            // 5. Clean up "Label:$" artifacts
             .replace(/:\$/g, ':');
 
         return processed;
