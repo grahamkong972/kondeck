@@ -54,6 +54,50 @@ const fileToBase64 = (file) => {
     });
 };
 
+// --- NUCLEAR JSON PARSER ---
+// Completely rebuilds the string to be safe for JSON.parse
+const cleanAndParseJSON = (text) => {
+    // 1. Remove Markdown Code Blocks
+    let clean = text.replace(/```json/g, '').replace(/```/g, '').trim();
+
+    // 2. Escape Logic Strategy:
+    //    The AI often returns LaTeX like "\sigma" inside a JSON string.
+    //    JSON requires this to be "\\sigma".
+    //    However, it also returns "\n" for newlines, which MUST remain "\n" (or "\\n" depending on raw vs string).
+    
+    // Step A: Replace single backslashes with double backslashes, BUT ignore known valid JSON escapes.
+    // We use a negative lookahead to ignore: ", \, /, b, f, n, r, t, u
+    // AND we specifically check for \u followed by 4 hex digits (valid unicode) to avoid breaking "\usepackage"
+    
+    clean = clean.replace(/\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})/g, "\\\\");
+
+    // 3. Handle truncated responses (Self-Healing)
+    try {
+        return JSON.parse(clean);
+    } catch (e) {
+        // If it failed, it might be because of a hanging comma or cut-off bracket
+        if (clean.startsWith('[') && !clean.endsWith(']')) {
+            const lastClose = clean.lastIndexOf('}');
+            if (lastClose !== -1) {
+                // Cut off garbage and close the array
+                const fixed = clean.substring(0, lastClose + 1) + ']';
+                try { return JSON.parse(fixed); } catch (e2) { console.error("Repair failed", e2); }
+            }
+        }
+        if (clean.startsWith('{') && !clean.endsWith('}')) {
+             const lastQuote = clean.lastIndexOf('"');
+             if (lastQuote !== -1) {
+                 const fixed = clean.substring(0, lastQuote + 1) + '"}';
+                 try { return JSON.parse(fixed); } catch(e3) { console.error("Object repair failed", e3); }
+             }
+        }
+        
+        console.error("JSON Parse Error:", e);
+        console.log("Failed Text:", clean);
+        throw new Error("Failed to parse AI response. The content may contain complex LaTeX that broke the format.");
+    }
+};
+
 // --- TEXT RENDERER COMPONENT ---
 const FormattedText = ({ text, className = "" }) => {
     const containerRef = useRef(null);
@@ -133,26 +177,6 @@ const generateContent = async (apiKey, prompt, context, systemInstruction, attac
         contentsPart[0].text += "\n\n[DOCUMENT CONTEXT]: Analyze the attached image or PDF document carefully.";
     }
 
-    // Helper to cleanup and parse response
-    const parseResponse = (text) => {
-        let cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
-        cleanText = cleanText.replace(/\\(?!["\\/bfnrtu])/g, "\\\\");
-        try {
-            return JSON.parse(cleanText);
-        } catch (e) {
-            // Recovery for truncated JSON
-            if (cleanText.trim().startsWith('[') && !cleanText.trim().endsWith(']')) {
-                const lastObjectEnd = cleanText.lastIndexOf('}');
-                if (lastObjectEnd !== -1) return JSON.parse(cleanText.substring(0, lastObjectEnd + 1) + ']');
-            }
-            if (cleanText.trim().startsWith('{') && !cleanText.trim().endsWith('}')) {
-                 const lastQuote = cleanText.lastIndexOf('"');
-                 if (lastQuote !== -1) return JSON.parse(cleanText.substring(0, lastQuote + 1) + '"}'); 
-            }
-            throw e;
-        }
-    };
-
     for (let attempt = 0; attempt < 3; attempt++) {
         try {
             const response = await fetch(url, {
@@ -165,7 +189,6 @@ const generateContent = async (apiKey, prompt, context, systemInstruction, attac
             });
 
             if (response.status === 429) {
-                // If local rate limit hit
                 throw new Error("Quota Exceeded. Please wait a moment or check your Google Cloud billing.");
             }
 
@@ -175,9 +198,11 @@ const generateContent = async (apiKey, prompt, context, systemInstruction, attac
             const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
             if (!text) throw new Error("No content generated.");
 
-            return parseResponse(text);
+            // USE THE NEW PARSER
+            return cleanAndParseJSON(text);
 
         } catch (error) {
+            console.warn(`Attempt ${attempt + 1} failed:`, error.message);
             if (attempt === 2) throw error; 
             await sleep(2000 * (attempt + 1)); 
         }
