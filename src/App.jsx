@@ -60,10 +60,98 @@ const getCardStatus = (card) => {
     const now = Date.now();
     if (card.nextReview <= now) return { label: 'Due', color: 'bg-orange-100 text-orange-700 border-orange-200' };
     
-    const oneDay = 24 * 60 * 60 * 1000;
-    if (card.nextReview > now + (3 * oneDay)) return { label: 'Mastered', color: 'bg-emerald-100 text-emerald-700 border-emerald-200' };
+    // If interval > 21 days, it's considered Mastered/Mature
+    if (card.interval > 21) return { label: 'Mastered', color: 'bg-emerald-100 text-emerald-700 border-emerald-200' };
     
     return { label: 'Learning', color: 'bg-yellow-100 text-yellow-700 border-yellow-200' };
+};
+
+// --- ANKI ALGORITHM (SM-2 IMPROVED) ---
+const calculateAnki = (card, rating) => {
+    // Defaults for new cards
+    const ease = card.ease || 2.5;
+    const interval = card.interval || 0;
+    const step = card.step || 0; // 0 = 1min, 1 = 10min (Learning steps)
+    const status = card.status || 'learning'; // 'learning', 'review', 'relearning'
+
+    const now = Date.now();
+    let newEase = ease;
+    let newInterval = interval;
+    let newStep = step;
+    let newStatus = status;
+    let nextReviewTime = now;
+
+    // --- LEARNING PHASE ---
+    if (status === 'learning' || status === 'relearning') {
+        if (rating === 'again') {
+            newStep = 0;
+            nextReviewTime = now + (1 * 60 * 1000); // 1 min
+        } else if (rating === 'hard') {
+            // Repeat current step
+            const stepMinutes = newStep === 0 ? 1 : 10;
+            nextReviewTime = now + (stepMinutes * 60 * 1000); 
+        } else if (rating === 'good') {
+            if (newStep === 0) {
+                newStep = 1;
+                nextReviewTime = now + (10 * 60 * 1000); // 10 min
+            } else {
+                // Graduate
+                newStatus = 'review';
+                newInterval = 1; // 1 day
+                nextReviewTime = now + (newInterval * 24 * 60 * 60 * 1000);
+            }
+        } else if (rating === 'easy') {
+            // Graduate immediately
+            newStatus = 'review';
+            newInterval = 4; // 4 days (Easy bonus)
+            nextReviewTime = now + (newInterval * 24 * 60 * 60 * 1000);
+        }
+    } 
+    // --- REVIEW PHASE (Graduated) ---
+    else if (status === 'review') {
+        if (rating === 'again') {
+            newStatus = 'relearning';
+            newStep = 0;
+            newEase = Math.max(1.3, ease - 0.20); // Decrease ease by 20%
+            newInterval = Math.max(1, newInterval * 0.0); // Reset interval (simplified lapse)
+            nextReviewTime = now + (1 * 60 * 1000); // 1 min relearning step
+        } else if (rating === 'hard') {
+            newEase = Math.max(1.3, ease - 0.15); // Decrease ease by 15%
+            newInterval = Math.max(1, newInterval * 1.2); // 1.2x interval
+            nextReviewTime = now + (newInterval * 24 * 60 * 60 * 1000);
+        } else if (rating === 'good') {
+            newInterval = Math.max(1, newInterval * ease); // Interval * Ease
+            nextReviewTime = now + (newInterval * 24 * 60 * 60 * 1000);
+        } else if (rating === 'easy') {
+            newEase = ease + 0.15; // Increase ease by 15%
+            newInterval = Math.max(1, newInterval * ease * 1.3); // Interval * Ease * EasyBonus (1.3)
+            nextReviewTime = now + (newInterval * 24 * 60 * 60 * 1000);
+        }
+    }
+
+    return {
+        ...card,
+        ease: newEase,
+        interval: newInterval,
+        step: newStep,
+        status: newStatus,
+        nextReview: nextReviewTime,
+        lastReviewed: now
+    };
+};
+
+// Helper to format button labels
+const getButtonLabel = (card, rating) => {
+    const nextState = calculateAnki(card || {}, rating);
+    const diff = nextState.nextReview - Date.now();
+    
+    // Format duration
+    const minutes = Math.round(diff / 60000);
+    if (minutes < 60) return `${minutes}m`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 24) return `${hours}h`;
+    const days = Math.round(hours / 24);
+    return `${days}d`;
 };
 
 // --- DATA SANITIZER ---
@@ -76,20 +164,18 @@ const validateAndFixData = (data, type) => {
             return {
                 q: String(item.q || "Error: Question missing"),
                 a: String(item.a || "Error: Answer missing"),
-                nextReview: item.nextReview || null 
+                nextReview: item.nextReview || null,
+                // Ensure SRS fields exist
+                ease: item.ease || 2.5,
+                interval: item.interval || 0,
+                status: item.status || 'learning'
             };
         }
         // Fix MCQs
         if (type === 'mcq') {
             let options = item.options;
-            // Handle case where options is missing or not an array
-            if (!options || !Array.isArray(options)) {
-                options = ["True", "False"]; // Fallback options
-            }
-            
-            // Handle case where option strings are malformed
+            if (!options || !Array.isArray(options)) options = ["True", "False"]; 
             options = options.map(opt => String(opt || "Option missing"));
-            
             return {
                 q: String(item.q || "Error: Question missing"),
                 options: options,
@@ -243,7 +329,6 @@ const generateContent = async (apiKey, prompt, context, systemInstruction, attac
 };
 
 // ... Sidebar, AuthPage, FolderDashboard, ManageModal, NameModal are same ...
-// Including them for completeness in the file block
 
 // --- APP COMPONENTS ---
 
