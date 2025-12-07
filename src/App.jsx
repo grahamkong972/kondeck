@@ -320,7 +320,7 @@ const ExamSetupModal = ({ modules, onClose, onStartExam }) => {
     const mcqMarks = Math.round(totalMarks * (mcqPercentage / 100));
     const saqMarks = totalMarks - mcqMarks;
     const numMCQs = mcqMarks;
-    const numSAQs = Math.max(1, Math.round(saqMarks / 5)); 
+    const numSAQs = Math.max(1, Math.round(saqMarks / 5)); // Estimated 5 marks per SAQ
 
     const toggleModule = (id) => {
         setSelectedModuleIds(prev => prev.includes(id) ? prev.filter(m => m !== id) : [...prev, id]);
@@ -381,12 +381,12 @@ const ExamSetupModal = ({ modules, onClose, onStartExam }) => {
     );
 };
 
-// --- EXAM RUNNER ---
+// --- EXAM RUNNER (Unified Quiz + SAQ) ---
 const ExamRunner = ({ questions, timeLimit, onBack, apiKey }) => {
     const [answers, setAnswers] = useState({});
     const [saqFeedback, setSaqFeedback] = useState({});
     const [submitted, setSubmitted] = useState(false);
-    const [timeLeft, setTimeLeft] = useState(timeLimit ? timeLimit * 60 : 600); 
+    const [timeLeft, setTimeLeft] = useState(timeLimit ? timeLimit * 60 : 600); // Default fallback
     const [gradingLoading, setGradingLoading] = useState({});
 
     useEffect(() => {
