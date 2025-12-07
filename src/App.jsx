@@ -239,72 +239,10 @@ const generateContent = async (apiKey, prompt, context, systemInstruction, attac
     }
 };
 
-// --- AUTH COMPONENT ---
-const AuthPage = () => {
-    const [isLogin, setIsLogin] = useState(true);
-    const [email, setEmail] = useState("");
-    const [password, setPassword] = useState("");
-    const [error, setError] = useState("");
-    const [loading, setLoading] = useState(false);
+// ... Sidebar, AuthPage, ManageModal, NameModal are same ...
 
-    const handleAuth = async (e) => {
-        e.preventDefault();
-        setError("");
-        setLoading(true);
-        try {
-            if (isLogin) {
-                await signInWithEmailAndPassword(auth, email, password);
-            } else {
-                await createUserWithEmailAndPassword(auth, email, password);
-            }
-        } catch (err) {
-            setError(err.message.replace("Firebase: ", ""));
-        } finally {
-            setLoading(false);
-        }
-    };
+// --- APP COMPONENTS ---
 
-    return (
-        <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-8">
-                <div className="text-center mb-8">
-                    <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-indigo-100 text-indigo-600 mb-4">
-                        <GraduationCap size={24} />
-                    </div>
-                    <h1 className="text-2xl font-bold text-slate-900">Welcome to StudyGenie</h1>
-                    <p className="text-slate-500 mt-2">Your AI-powered study companion.</p>
-                </div>
-                <form onSubmit={handleAuth} className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
-                        <div className="relative">
-                            <Mail className="absolute left-3 top-3 text-slate-400" size={18} />
-                            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="student@university.edu" required />
-                        </div>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
-                        <div className="relative">
-                            <Lock className="absolute left-3 top-3 text-slate-400" size={18} />
-                            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="••••••••" required />
-                        </div>
-                    </div>
-                    {error && <div className="text-red-500 text-sm bg-red-50 p-3 rounded-lg flex items-center gap-2"><AlertCircle size={14}/> {error}</div>}
-                    <button type="submit" disabled={loading} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70">
-                        {loading ? <RotateCw className="animate-spin" size={20}/> : (isLogin ? "Sign In" : "Create Account")}
-                    </button>
-                </form>
-                <div className="mt-6 text-center">
-                    <button onClick={() => setIsLogin(!isLogin)} className="text-sm text-indigo-600 hover:text-indigo-800 font-medium">
-                        {isLogin ? "Need an account? Sign Up" : "Already have an account? Sign In"}
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-};
-
-// --- SIDEBAR COMPONENT ---
 const Sidebar = ({ folders, decks, activeId, viewMode, onSelectDeck, onSelectFolder, onAddFolder, onDeleteFolder, onRenameFolder, onAddDeck, onDeleteDeck, onSettings }) => {
     const [expandedFolders, setExpandedFolders] = useState({});
 
@@ -380,9 +318,74 @@ const Sidebar = ({ folders, decks, activeId, viewMode, onSelectDeck, onSelectFol
     );
 };
 
-const FolderDashboard = ({ folder, decks, onUpdateFolder, apiKey }) => {
+const AuthPage = () => {
+    const [isLogin, setIsLogin] = useState(true);
+    const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
+    const [error, setError] = useState("");
+    const [loading, setLoading] = useState(false);
+
+    const handleAuth = async (e) => {
+        e.preventDefault();
+        setError("");
+        setLoading(true);
+        try {
+            if (isLogin) {
+                await signInWithEmailAndPassword(auth, email, password);
+            } else {
+                await createUserWithEmailAndPassword(auth, email, password);
+            }
+        } catch (err) {
+            setError(err.message.replace("Firebase: ", ""));
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-8">
+                <div className="text-center mb-8">
+                    <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-indigo-100 text-indigo-600 mb-4">
+                        <GraduationCap size={24} />
+                    </div>
+                    <h1 className="text-2xl font-bold text-slate-900">Welcome to StudyGenie</h1>
+                    <p className="text-slate-500 mt-2">Your AI-powered study companion.</p>
+                </div>
+                <form onSubmit={handleAuth} className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+                        <div className="relative">
+                            <Mail className="absolute left-3 top-3 text-slate-400" size={18} />
+                            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="student@university.edu" required />
+                        </div>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
+                        <div className="relative">
+                            <Lock className="absolute left-3 top-3 text-slate-400" size={18} />
+                            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="••••••••" required />
+                        </div>
+                    </div>
+                    {error && <div className="text-red-500 text-sm bg-red-50 p-3 rounded-lg flex items-center gap-2"><AlertCircle size={14}/> {error}</div>}
+                    <button type="submit" disabled={loading} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70">
+                        {loading ? <RotateCw className="animate-spin" size={20}/> : (isLogin ? "Sign In" : "Create Account")}
+                    </button>
+                </form>
+                <div className="mt-6 text-center">
+                    <button onClick={() => setIsLogin(!isLogin)} className="text-sm text-indigo-600 hover:text-indigo-800 font-medium">
+                        {isLogin ? "Need an account? Sign Up" : "Already have an account? Sign In"}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }) => {
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [syllabusText, setSyllabusText] = useState(folder.syllabus || "");
+    const [isGlobalStudy, setIsGlobalStudy] = useState(false);
 
     useEffect(() => { setSyllabusText(folder.syllabus || ""); }, [folder.id]);
     const handleSaveSyllabus = () => onUpdateFolder({ ...folder, syllabus: syllabusText }); 
@@ -404,6 +407,30 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, apiKey }) => {
             alert(error.message); 
         } finally { setIsAnalyzing(false); }
     };
+
+    const globalCards = decks.flatMap(d => (d.cards || []).map(c => ({...c, _deckId: d.id})));
+
+    const handleGlobalUpdate = (updatedGlobalDeck) => {
+        const cardsByDeck = {};
+        updatedGlobalDeck.cards.forEach(c => {
+            if (c._deckId) {
+                if (!cardsByDeck[c._deckId]) cardsByDeck[c._deckId] = [];
+                cardsByDeck[c._deckId].push(c);
+            }
+        });
+
+        Object.keys(cardsByDeck).forEach(deckId => {
+            const originalDeck = decks.find(d => d.id === deckId);
+            if (originalDeck) {
+                onUpdateDeck({ ...originalDeck, cards: cardsByDeck[deckId] });
+            }
+        });
+    };
+
+    if (isGlobalStudy) {
+        const virtualDeck = { id: 'global', title: `${folder.name} (Global)`, studyMode: 'srs', cards: globalCards };
+        return <FlashcardStudy cards={globalCards} deck={virtualDeck} apiKey={apiKey} onUpdateDeck={handleGlobalUpdate} onBack={() => setIsGlobalStudy(false)} />;
+    }
 
     const totalCards = decks.reduce((sum, d) => sum + (d.cards?.length || 0), 0);
     const totalQuestions = decks.reduce((sum, d) => sum + (d.quiz?.length || 0), 0);
@@ -451,6 +478,19 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, apiKey }) => {
                             <div className="bg-indigo-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-indigo-600">{totalCards}</div><div className="text-xs text-indigo-400 uppercase">Cards</div></div>
                             <div className="bg-emerald-50 p-4 rounded-lg text-center col-span-2"><div className="text-2xl font-bold text-emerald-600">{totalQuestions}</div><div className="text-xs text-emerald-400 uppercase">Quiz Questions</div></div>
                         </div>
+                    </div>
+                    
+                    {/* GLOBAL STUDY BUTTON */}
+                    <div className="bg-gradient-to-br from-indigo-600 to-violet-600 p-6 rounded-xl shadow-md text-white">
+                        <h3 className="font-bold text-lg mb-2 flex items-center gap-2"><Layers/> Global Study</h3>
+                        <p className="text-indigo-100 text-sm mb-4">Combine all {totalCards} cards from this folder into one spaced-repetition session.</p>
+                        <button 
+                            onClick={() => setIsGlobalStudy(true)}
+                            disabled={totalCards === 0}
+                            className="w-full bg-white text-indigo-600 font-bold py-3 rounded-lg hover:bg-indigo-50 transition disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                        >
+                            <Zap size={18}/> Study All (SRS)
+                        </button>
                     </div>
                 </div>
             </div>
