@@ -5,10 +5,10 @@ import {
     RotateCw, CheckCircle, XCircle, Folder, ChevronDown,
     Mic, Presentation, BookOpenText, PieChart, AlertCircle,
     LayoutDashboard, Image as ImageIcon, X, FileType, LogOut, Lock, Mail, Edit3, Edit2,
-    Clock, Layers, Zap, Tag, Hash, Timer, Award
+    Clock, Layers, Zap, Tag, Hash, Timer, Award, FileQuestion
 } from 'lucide-react';
 
-// --- FIREBASE IMPORTS ---
+// --- FIREBASE IMPORTS (Optional/Placeholder for future) ---
 import { initializeApp } from "firebase/app";
 import { 
     getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, 
@@ -66,7 +66,7 @@ const getCardStatus = (card) => {
     return { label: 'Learning', color: 'bg-yellow-100 text-yellow-700 border-yellow-200' };
 };
 
-// --- DATA SANITIZER (PREVENTS CRASHES) ---
+// --- DATA SANITIZER ---
 const validateAndFixData = (data, type) => {
     if (!Array.isArray(data)) return [];
     
@@ -79,13 +79,12 @@ const validateAndFixData = (data, type) => {
                 nextReview: item.nextReview || null 
             };
         }
-        // Fix MCQs
-        if (type === 'mcq') {
+        // Fix MCQs (Quiz or Exam)
+        if (type === 'mcq' || type === 'exam') {
             let options = item.options;
             if (!options || !Array.isArray(options)) {
                 options = ["True", "False"]; 
             }
-            // Ensure all options are strings to prevent "Objects are not valid" error
             options = options.map(opt => String(opt));
             
             return {
@@ -163,7 +162,7 @@ const FormattedText = ({ text, className = "" }) => {
     if (text === null || text === undefined) return null;
 
     const processText = (str) => {
-        if (typeof str !== 'string') return String(str); // Force string to prevent object errors
+        if (typeof str !== 'string') return String(str);
         return str
             .replace(/ewline/g, '<br/>') 
             .replace(/\\newline/g, '<br/>') 
@@ -239,7 +238,64 @@ const generateContent = async (apiKey, prompt, context, systemInstruction, attac
     }
 };
 
-// ... Sidebar, AuthPage, ManageModal, NameModal are same ...
+// --- AUTH COMPONENT ---
+// (Included but currently bypassed by LocalStorage logic in main App)
+const AuthPage = () => {
+    return (
+        <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+            <div className="text-center text-slate-500">
+                Auth currently disabled for Local Mode.
+            </div>
+        </div>
+    );
+};
+
+// --- EXAM SETUP MODAL ---
+const ExamSetupModal = ({ modules, onClose, onStartExam }) => {
+    const [selectedModuleIds, setSelectedModuleIds] = useState([]);
+
+    const toggleModule = (id) => {
+        setSelectedModuleIds(prev => 
+            prev.includes(id) ? prev.filter(m => m !== id) : [...prev, id]
+        );
+    };
+
+    const handleStart = () => {
+        if (selectedModuleIds.length === 0) return alert("Select at least one module.");
+        onStartExam(selectedModuleIds);
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+                <h3 className="font-bold text-lg text-slate-800 mb-4 flex items-center gap-2">
+                    <FileQuestion className="text-red-500"/> Mock Exam Setup
+                </h3>
+                <p className="text-sm text-slate-500 mb-4">Select modules to include in this exam simulation.</p>
+                
+                <div className="max-h-60 overflow-y-auto custom-scroll mb-6 border rounded-lg">
+                    {modules.map(m => (
+                        <div 
+                            key={m.id} 
+                            onClick={() => toggleModule(m.id)}
+                            className={`flex items-center justify-between p-3 border-b last:border-b-0 cursor-pointer hover:bg-slate-50 ${selectedModuleIds.includes(m.id) ? 'bg-indigo-50' : ''}`}
+                        >
+                            <span className="text-sm font-medium text-slate-700">{m.title}</span>
+                            {selectedModuleIds.includes(m.id) && <CheckCircle size={16} className="text-indigo-600"/>}
+                        </div>
+                    ))}
+                </div>
+
+                <div className="flex gap-2 justify-end">
+                    <button onClick={onClose} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition text-sm">Cancel</button>
+                    <button onClick={handleStart} className="px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition text-sm font-bold flex items-center gap-2">
+                        Start Exam
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
 
 // --- APP COMPONENTS ---
 
@@ -318,74 +374,14 @@ const Sidebar = ({ folders, decks, activeId, viewMode, onSelectDeck, onSelectFol
     );
 };
 
-const AuthPage = () => {
-    const [isLogin, setIsLogin] = useState(true);
-    const [email, setEmail] = useState("");
-    const [password, setPassword] = useState("");
-    const [error, setError] = useState("");
-    const [loading, setLoading] = useState(false);
-
-    const handleAuth = async (e) => {
-        e.preventDefault();
-        setError("");
-        setLoading(true);
-        try {
-            if (isLogin) {
-                await signInWithEmailAndPassword(auth, email, password);
-            } else {
-                await createUserWithEmailAndPassword(auth, email, password);
-            }
-        } catch (err) {
-            setError(err.message.replace("Firebase: ", ""));
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    return (
-        <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-8">
-                <div className="text-center mb-8">
-                    <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-indigo-100 text-indigo-600 mb-4">
-                        <GraduationCap size={24} />
-                    </div>
-                    <h1 className="text-2xl font-bold text-slate-900">Welcome to StudyGenie</h1>
-                    <p className="text-slate-500 mt-2">Your AI-powered study companion.</p>
-                </div>
-                <form onSubmit={handleAuth} className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
-                        <div className="relative">
-                            <Mail className="absolute left-3 top-3 text-slate-400" size={18} />
-                            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="student@university.edu" required />
-                        </div>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
-                        <div className="relative">
-                            <Lock className="absolute left-3 top-3 text-slate-400" size={18} />
-                            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="••••••••" required />
-                        </div>
-                    </div>
-                    {error && <div className="text-red-500 text-sm bg-red-50 p-3 rounded-lg flex items-center gap-2"><AlertCircle size={14}/> {error}</div>}
-                    <button type="submit" disabled={loading} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70">
-                        {loading ? <RotateCw className="animate-spin" size={20}/> : (isLogin ? "Sign In" : "Create Account")}
-                    </button>
-                </form>
-                <div className="mt-6 text-center">
-                    <button onClick={() => setIsLogin(!isLogin)} className="text-sm text-indigo-600 hover:text-indigo-800 font-medium">
-                        {isLogin ? "Need an account? Sign Up" : "Already have an account? Sign In"}
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-};
-
 const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }) => {
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [syllabusText, setSyllabusText] = useState(folder.syllabus || "");
     const [isGlobalStudy, setIsGlobalStudy] = useState(false);
+    
+    // NEW: Exam Setup State
+    const [showExamSetup, setShowExamSetup] = useState(false);
+    const [activeExamData, setActiveExamData] = useState(null); // For global exam
 
     useEffect(() => { setSyllabusText(folder.syllabus || ""); }, [folder.id]);
     const handleSaveSyllabus = () => onUpdateFolder({ ...folder, syllabus: syllabusText }); 
@@ -408,6 +404,7 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }
         } finally { setIsAnalyzing(false); }
     };
 
+    // Prepare global deck
     const globalCards = decks.flatMap(d => (d.cards || []).map(c => ({...c, _deckId: d.id})));
 
     const handleGlobalUpdate = (updatedGlobalDeck) => {
@@ -427,13 +424,46 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }
         });
     };
 
+    // HANDLER FOR STARTING MOCK EXAM
+    const handleStartMockExam = (moduleIds) => {
+        // Aggregate 'exams' questions from selected modules
+        const examQuestions = decks
+            .filter(d => moduleIds.includes(d.id))
+            .flatMap(d => (d.exams || []));
+        
+        if (examQuestions.length === 0) return alert("No exam questions found in selected modules. Generate 'Exam Prep' content inside the modules first.");
+        
+        // Shuffle
+        const shuffled = [...examQuestions].sort(() => 0.5 - Math.random());
+        setActiveExamData(shuffled);
+        setShowExamSetup(false);
+    };
+
     if (isGlobalStudy) {
-        const virtualDeck = { id: 'global', title: `${folder.name} (Global)`, studyMode: 'srs', cards: globalCards };
-        return <FlashcardStudy cards={globalCards} deck={virtualDeck} apiKey={apiKey} onUpdateDeck={handleGlobalUpdate} onBack={() => setIsGlobalStudy(false)} />;
+        const virtualDeck = { 
+            id: 'global', 
+            title: `${folder.name} (Global)`, 
+            studyMode: 'srs', // Force SRS for global study usually
+            cards: globalCards 
+        };
+        return <FlashcardStudy 
+            cards={globalCards} 
+            deck={virtualDeck} 
+            apiKey={apiKey} 
+            onUpdateDeck={handleGlobalUpdate}
+            onBack={() => setIsGlobalStudy(false)} 
+        />;
+    }
+
+    // Render Active Global Exam
+    if (activeExamData) {
+         const virtualExamDeck = { quizMode: 'exam' };
+         return <QuizMode questions={activeExamData} deck={virtualExamDeck} onBack={() => setActiveExamData(null)} />;
     }
 
     const totalCards = decks.reduce((sum, d) => sum + (d.cards?.length || 0), 0);
     const totalQuestions = decks.reduce((sum, d) => sum + (d.quiz?.length || 0), 0);
+    const totalExamQs = decks.reduce((sum, d) => sum + (d.exams?.length || 0), 0);
 
     return (
         <div className="max-w-6xl mx-auto p-6 h-full flex flex-col">
@@ -442,7 +472,8 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 flex-1 min-h-0">
                 <div className="lg:col-span-8 flex flex-col gap-4 h-full">
-                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex-1 flex flex-col">
+                     {/* Syllabus Analysis Panel */}
+                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex-1 flex flex-col">
                         <div className="flex items-center justify-between mb-4">
                             <h3 className="font-bold text-slate-700 flex items-center gap-2"><BookOpenText size={20} className="text-emerald-500"/> Course Syllabus</h3>
                             <button onClick={handleSaveSyllabus} className="text-xs text-indigo-600 font-medium hover:underline">Save Text</button>
@@ -470,30 +501,39 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }
                             </div>
                         ) : <div className="text-center text-slate-400 py-8 text-sm">Run analysis to check coverage.</div>}
                     </div>
+                    
                     {/* Course Totals */}
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                         <h3 className="font-semibold text-slate-700 mb-4">Course Totals</h3>
                         <div className="grid grid-cols-2 gap-4">
                             <div className="bg-slate-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-slate-800">{decks.length}</div><div className="text-xs text-slate-500 uppercase">Modules</div></div>
                             <div className="bg-indigo-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-indigo-600">{totalCards}</div><div className="text-xs text-indigo-400 uppercase">Cards</div></div>
-                            <div className="bg-emerald-50 p-4 rounded-lg text-center col-span-2"><div className="text-2xl font-bold text-emerald-600">{totalQuestions}</div><div className="text-xs text-emerald-400 uppercase">Quiz Questions</div></div>
+                            <div className="bg-emerald-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-emerald-600">{totalQuestions}</div><div className="text-xs text-emerald-400 uppercase">Practice</div></div>
+                            <div className="bg-red-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-red-600">{totalExamQs}</div><div className="text-xs text-red-400 uppercase">Exam Qs</div></div>
                         </div>
                     </div>
                     
-                    {/* GLOBAL STUDY BUTTON */}
-                    <div className="bg-gradient-to-br from-indigo-600 to-violet-600 p-6 rounded-xl shadow-md text-white">
-                        <h3 className="font-bold text-lg mb-2 flex items-center gap-2"><Layers/> Global Study</h3>
-                        <p className="text-indigo-100 text-sm mb-4">Combine all {totalCards} cards from this folder into one spaced-repetition session.</p>
-                        <button 
-                            onClick={() => setIsGlobalStudy(true)}
-                            disabled={totalCards === 0}
-                            className="w-full bg-white text-indigo-600 font-bold py-3 rounded-lg hover:bg-indigo-50 transition disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                        >
-                            <Zap size={18}/> Study All (SRS)
-                        </button>
+                    {/* GLOBAL BUTTONS */}
+                    <div className="space-y-3">
+                        <div className="bg-gradient-to-br from-indigo-600 to-violet-600 p-6 rounded-xl shadow-md text-white">
+                            <h3 className="font-bold text-lg mb-2 flex items-center gap-2"><Layers/> Global Study</h3>
+                            <button onClick={() => setIsGlobalStudy(true)} disabled={totalCards === 0} className="w-full bg-white text-indigo-600 font-bold py-3 rounded-lg hover:bg-indigo-50 transition disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"><Zap size={18}/> Study All (SRS)</button>
+                        </div>
+                        <div className="bg-gradient-to-br from-red-500 to-rose-600 p-6 rounded-xl shadow-md text-white">
+                            <h3 className="font-bold text-lg mb-2 flex items-center gap-2"><FileQuestion/> Mock Exam</h3>
+                            <button onClick={() => setShowExamSetup(true)} disabled={totalExamQs === 0} className="w-full bg-white text-red-600 font-bold py-3 rounded-lg hover:bg-red-50 transition disabled:opacity-70 flex items-center justify-center gap-2"><Timer size={18}/> Build Exam</button>
+                        </div>
                     </div>
                 </div>
             </div>
+            
+            {showExamSetup && (
+                <ExamSetupModal 
+                    modules={decks} 
+                    onClose={() => setShowExamSetup(false)} 
+                    onStartExam={handleStartMockExam} 
+                />
+            )}
         </div>
     );
 };
@@ -635,14 +675,14 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
 
     // DELETION HANDLERS
     const handleDeleteItem = (index) => {
-        const key = manageMode === 'flashcards' ? 'cards' : 'quiz';
+        const key = manageMode === 'flashcards' ? 'cards' : (manageMode === 'quiz' ? 'quiz' : 'exams');
         const newItems = [...(deck[key] || [])];
         newItems.splice(index, 1);
         onUpdateDeck({ ...deck, [key]: newItems });
     };
 
     const handleDeleteAll = () => {
-        const key = manageMode === 'flashcards' ? 'cards' : 'quiz';
+        const key = manageMode === 'flashcards' ? 'cards' : (manageMode === 'quiz' ? 'quiz' : 'exams');
         if (confirm(`Delete ALL ${manageMode}? This cannot be undone.`)) {
             onUpdateDeck({ ...deck, [key]: [] });
             setManageMode(null);
@@ -690,12 +730,13 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
             let attachmentPayload = null;
             if (attachment?.file) attachmentPayload = await fileToBase64(attachment.file);
 
-            const BATCH_SIZE = 5; 
+            const BATCH_SIZE = (type === 'flashcards') ? 20 : 10; 
             const totalBatches = Math.ceil(count / BATCH_SIZE);
             let accumulatedResults = [];
 
-            // OVERLAP PREVENTION
-            const existingItems = type === "flashcards" ? (deck.cards || []) : (deck.quiz || []);
+            // Determine target array
+            const targetKey = type === 'flashcards' ? 'cards' : (type === 'exam' ? 'exams' : 'quiz');
+            const existingItems = deck[targetKey] || [];
             const existingSample = existingItems.slice(-30).map(item => item.q.substring(0, 30)).join(" | ");
 
             for (let i = 0; i < totalBatches; i++) {
@@ -710,15 +751,21 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
                 
                 const avoidInstruction = exclusionList.length > 5 ? ` CRITICAL: Do NOT generate questions similar to these: [${exclusionList.substring(0, 500)}...]` : "";
 
-                let prompt = type === "flashcards" 
-                    ? `Generate ${currentBatchCount} flashcards (JSON: [{"q":..., "a":...}]).${avoidInstruction}`
-                    : `Generate ${currentBatchCount} MCQs (JSON: [{"q":..., "options":..., "a":..., "exp":...}]).${avoidInstruction}`;
+                let prompt = "";
+                if (type === "flashcards") {
+                    prompt = `Generate ${currentBatchCount} flashcards (JSON: [{"q":..., "a":...}]).${avoidInstruction}`;
+                } else if (type === "exam") {
+                    // SPECIAL EXAM PROMPT
+                    prompt = `Generate ${currentBatchCount} HARD, scenario-based multiple choice questions for a FINAL EXAM. Focus on application of knowledge, critical thinking, and synthesis. Return JSON: [{"q":..., "options":..., "a":..., "exp":...}].${avoidInstruction}`;
+                } else {
+                    prompt = `Generate ${currentBatchCount} multiple choice questions (JSON: [{"q":..., "options":..., "a":..., "exp":...}]).${avoidInstruction}`;
+                }
 
                 try {
                     const batchResult = await generateContent(apiKey, prompt, combinedContext, systemInstruction, attachmentPayload, currentBatchCount);
                     // Safe handling for result + data validation
                     const safeResult = Array.isArray(batchResult) ? batchResult : (batchResult ? [batchResult] : []);
-                    const validatedResult = validateAndFixData(safeResult, type); // Use sanitizer
+                    const validatedResult = validateAndFixData(safeResult, type === 'exam' ? 'mcq' : type);
                     
                     accumulatedResults = [...accumulatedResults, ...validatedResult];
                 } catch (batchError) { 
@@ -728,8 +775,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
             
             setStatusMessage("Saving...");
             const updatedDeck = { ...deck, ...currentInputs }; 
-            if (type === "flashcards") updatedDeck.cards = [...(deck.cards || []), ...accumulatedResults];
-            else updatedDeck.quiz = [...(deck.quiz || []), ...accumulatedResults];
+            updatedDeck[targetKey] = [...(deck[targetKey] || []), ...accumulatedResults];
             onUpdateDeck(updatedDeck);
 
         } catch (error) { 
@@ -790,22 +836,16 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
                             </div>
                         </div>
 
-                        <div className="flex gap-3 w-full sm:w-auto">
-                            <button 
-                                onClick={() => handleGenerate('flashcards')} 
-                                disabled={isGenerating} 
-                                className="flex-1 sm:flex-none bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 shadow-sm text-sm"
-                            >
-                                {isGenerating ? <RotateCw className="animate-spin" size={16}/> : <Sparkles size={16}/>} 
-                                {isGenerating ? statusMessage : "Flashcards"}
+                        <div className="flex gap-2 w-full sm:w-auto">
+                            <button onClick={() => handleGenerate('flashcards')} disabled={isGenerating} className="flex-1 sm:flex-none bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 shadow-sm text-sm">
+                                {isGenerating ? <RotateCw className="animate-spin" size={16}/> : <Sparkles size={16}/>} {isGenerating ? statusMessage : "Cards"}
                             </button>
-                            <button 
-                                onClick={() => handleGenerate('mcq')} 
-                                disabled={isGenerating} 
-                                className="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 shadow-sm text-sm"
-                            >
-                                {isGenerating ? <RotateCw className="animate-spin" size={16}/> : <Brain size={16}/>} 
-                                {isGenerating ? statusMessage : "Quiz"}
+                            <button onClick={() => handleGenerate('mcq')} disabled={isGenerating} className="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 shadow-sm text-sm">
+                                {isGenerating ? <RotateCw className="animate-spin" size={16}/> : <Brain size={16}/>} {isGenerating ? statusMessage : "Quiz"}
+                            </button>
+                            {/* NEW: Exam Prep Button */}
+                            <button onClick={() => handleGenerate('exam')} disabled={isGenerating} className="flex-1 sm:flex-none bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 shadow-sm text-sm" title="Generate Hard Exam Questions">
+                                {isGenerating ? <RotateCw className="animate-spin" size={16}/> : <FileQuestion size={16}/>} {isGenerating ? statusMessage : "Exam"}
                             </button>
                         </div>
                     </div>
@@ -824,7 +864,13 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
                             <div className="bg-emerald-50 p-4 rounded-lg border border-emerald-100 flex flex-col items-center justify-center text-center relative group">
                                 <button onClick={() => setManageMode('quiz')} className="absolute top-2 right-2 text-emerald-300 hover:text-emerald-600 opacity-0 group-hover:opacity-100 transition p-1" title="Manage Questions"><Edit3 size={14}/></button>
                                 <div className="text-3xl font-bold text-emerald-600 mb-1">{deck.quiz?.length || 0}</div>
-                                <div className="text-xs text-emerald-400 font-bold uppercase">Quiz</div>
+                                <div className="text-xs text-emerald-400 font-bold uppercase">Practice</div>
+                            </div>
+                            {/* EXAM STATS */}
+                            <div className="bg-red-50 p-4 rounded-lg border border-red-100 flex flex-col items-center justify-center text-center relative group col-span-2">
+                                <button onClick={() => setManageMode('exams')} className="absolute top-2 right-2 text-red-300 hover:text-red-600 opacity-0 group-hover:opacity-100 transition p-1" title="Manage Exam Questions"><Edit3 size={14}/></button>
+                                <div className="text-3xl font-bold text-red-600 mb-1">{deck.exams?.length || 0}</div>
+                                <div className="text-xs text-red-400 font-bold uppercase">Exam Questions</div>
                             </div>
                         </div>
                     </div>
@@ -842,27 +888,22 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
                              </button>
                         </div>
 
-                        <div className="bg-white p-4 rounded-xl border border-slate-200">
-                            <div className="flex justify-between items-center mb-3">
-                                <span className="font-bold text-slate-700">Quiz Mode</span>
-                                <div className="flex bg-slate-100 rounded-lg p-1">
-                                    <button onClick={() => toggleQuizMode('practice')} className={`px-3 py-1 rounded-md text-xs font-bold transition ${(!deck.quizMode || deck.quizMode === 'practice') ? 'bg-white shadow text-emerald-600' : 'text-slate-500'}`}>Practice</button>
-                                    <button onClick={() => toggleQuizMode('exam')} className={`px-3 py-1 rounded-md text-xs font-bold transition ${deck.quizMode === 'exam' ? 'bg-white shadow text-emerald-600' : 'text-slate-500'}`}>Exam</button>
-                                </div>
-                            </div>
-                            <button onClick={() => onUpdateDeck({...deck, mode: 'quiz'})} disabled={!deck.quiz?.length} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                                <Brain size={18}/> Start Quiz
+                        <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-2">
+                            <button onClick={() => onUpdateDeck({...deck, mode: 'quiz', quizMode: 'practice'})} disabled={!deck.quiz?.length} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                                <Brain size={18}/> Practice Quiz
+                            </button>
+                            <button onClick={() => onUpdateDeck({...deck, mode: 'exam', quizMode: 'exam'})} disabled={!deck.exams?.length} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                                <FileQuestion size={18}/> Simulate Exam
                             </button>
                         </div>
                     </div>
                 </div>
             </div>
 
-            {/* Management Modal */}
             {manageMode && (
                 <ManageModal 
                     type={manageMode}
-                    items={manageMode === 'flashcards' ? (deck.cards || []) : (deck.quiz || [])}
+                    items={manageMode === 'flashcards' ? (deck.cards || []) : (manageMode === 'quiz' ? (deck.quiz || []) : (deck.exams || []))}
                     onClose={() => setManageMode(null)}
                     onDeleteItem={handleDeleteItem}
                     onDeleteAll={handleDeleteAll}
@@ -1295,6 +1336,7 @@ export default function App() {
                         {activeDeck.mode === 'dashboard' && <ModuleDashboard deck={activeDeck} onUpdateDeck={updateDeck} apiKey={apiKey} userProfile={userProfile} />}
                         {activeDeck.mode === 'flashcards' && <FlashcardStudy cards={activeDeck.cards || []} deck={activeDeck} onUpdateDeck={updateDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} apiKey={apiKey} />}
                         {activeDeck.mode === 'quiz' && <QuizMode questions={activeDeck.quiz || []} deck={activeDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} />}
+                        {activeDeck.mode === 'exam' && <QuizMode questions={activeDeck.exams || []} deck={activeDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} />}
                     </>
                 )}
 
