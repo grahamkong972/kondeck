@@ -66,6 +66,42 @@ const getCardStatus = (card) => {
     return { label: 'Learning', color: 'bg-yellow-100 text-yellow-700 border-yellow-200' };
 };
 
+// --- DATA SANITIZER ---
+// Ensures that data returned by AI matches the shape we expect, preventing crashes.
+const validateAndFixData = (data, type) => {
+    if (!Array.isArray(data)) return [];
+    
+    return data.map(item => {
+        // Fix Flashcards
+        if (type === 'flashcards') {
+            return {
+                q: String(item.q || "Error: Question missing"),
+                a: String(item.a || "Error: Answer missing"),
+                // Preserve existing SRS data if this is an update, or init new
+                nextReview: item.nextReview || null 
+            };
+        }
+        // Fix MCQs
+        if (type === 'mcq') {
+            let options = item.options;
+            // If options is a string (AI error), try to split it
+            if (typeof options === 'string') {
+                options = options.split(',').map(s => s.trim());
+            }
+            // Ensure options is an array
+            if (!Array.isArray(options)) options = ["True", "False"]; 
+            
+            return {
+                q: String(item.q || "Error: Question missing"),
+                options: options.map(String),
+                a: typeof item.a === 'number' ? item.a : 0, // Ensure index is number
+                exp: String(item.exp || "No explanation provided.")
+            };
+        }
+        return item;
+    }).filter(item => item); // Remove nulls
+};
+
 // --- NUCLEAR JSON PARSER ---
 const cleanAndParseJSON = (text) => {
     let clean = text.replace(/```json/g, '').replace(/```/g, '').trim();
@@ -203,7 +239,7 @@ const generateContent = async (apiKey, prompt, context, systemInstruction, attac
     }
 };
 
-// ... Sidebar, AuthPage, FolderDashboard, ModuleDashboard, ManageModal, NameModal are same as previous ...
+// ... Sidebar, AuthPage, FolderDashboard, ManageModal, NameModal are same as previous ...
 
 // --- APP COMPONENTS ---
 
@@ -424,6 +460,116 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, apiKey }) => {
     );
 };
 
+// --- MANAGE CONTENT MODAL ---
+const ManageModal = ({ type, items, onClose, onDeleteItem, onDeleteAll }) => {
+    return (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+                <div className="flex justify-between items-center p-6 border-b">
+                    <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
+                        {type === 'flashcards' ? <BookOpen className="text-indigo-500"/> : <Brain className="text-emerald-500"/>}
+                        Manage {type === 'flashcards' ? 'Flashcards' : 'Quiz Questions'}
+                    </h3>
+                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition"><X size={24}/></button>
+                </div>
+                
+                <div className="flex-1 overflow-y-auto p-4 custom-scroll">
+                    {items.length === 0 ? (
+                        <div className="text-center text-slate-400 py-12">No items to show.</div>
+                    ) : (
+                        <div className="space-y-2">
+                            {items.map((item, i) => {
+                                // Calculate visual status badge for List Item
+                                const status = type === 'flashcards' ? getCardStatus(item) : null;
+                                
+                                return (
+                                    <div key={i} className="flex items-start gap-3 p-3 bg-slate-50 rounded-lg border border-slate-100 group hover:border-slate-300 transition">
+                                        <div className="flex flex-col items-center gap-1 mt-1">
+                                            <span className="text-xs font-bold text-slate-400">{i + 1}.</span>
+                                            {status && (
+                                                <div className={`w-2 h-2 rounded-full ${status.color.replace('text-', 'bg-').split(' ')[0]}`} title={status.label}></div>
+                                            )}
+                                        </div>
+                                        <div className="flex-1 text-sm text-slate-700">
+                                            <div className="font-medium mb-1 flex items-center gap-2">
+                                                <FormattedText text={item.q} />
+                                                {status && <span className={`text-[10px] px-1.5 py-0.5 rounded border ${status.color}`}>{status.label}</span>}
+                                            </div>
+                                            <div className="text-xs text-slate-500 line-clamp-1 opacity-70">
+                                                {type === 'flashcards' ? <FormattedText text={item.a} /> : 'Multiple Choice'}
+                                            </div>
+                                        </div>
+                                        <button 
+                                            onClick={() => onDeleteItem(i)}
+                                            className="text-slate-400 hover:text-red-500 p-1 opacity-0 group-hover:opacity-100 transition"
+                                            title="Delete Item"
+                                        >
+                                            <Trash2 size={16}/>
+                                        </button>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+
+                <div className="p-4 border-t bg-slate-50 rounded-b-xl flex justify-between items-center">
+                    <span className="text-xs text-slate-500">{items.length} items total</span>
+                    <button 
+                        onClick={onDeleteAll}
+                        className="text-sm text-red-600 hover:text-red-800 font-medium flex items-center gap-2 px-4 py-2 hover:bg-red-50 rounded-lg transition"
+                    >
+                        <Trash2 size={16}/> Delete All
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// --- NAME INPUT MODAL ---
+const NameModal = ({ isOpen, type, initialValue, onClose, onSave }) => {
+    const [value, setValue] = useState(initialValue);
+    const inputRef = useRef(null);
+
+    useEffect(() => {
+        if (isOpen) {
+            setValue(initialValue);
+            setTimeout(() => inputRef.current?.focus(), 100);
+        }
+    }, [isOpen, initialValue]);
+
+    if (!isOpen) return null;
+
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        if (value.trim()) onSave(value.trim());
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
+                <h3 className="font-bold text-lg text-slate-800 mb-4">{type === 'create' ? 'New Folder' : 'Rename Folder'}</h3>
+                <form onSubmit={handleSubmit}>
+                    <input 
+                        ref={inputRef}
+                        type="text" 
+                        value={value} 
+                        onChange={(e) => setValue(e.target.value)}
+                        className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none mb-4 text-slate-800"
+                        placeholder="Folder Name"
+                    />
+                    <div className="flex gap-2 justify-end">
+                        <button type="button" onClick={onClose} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition text-sm">Cancel</button>
+                        <button type="submit" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition text-sm font-bold">Save</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
+
 const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
     const [isGenerating, setIsGenerating] = useState(false);
     const [statusMessage, setStatusMessage] = useState("");
@@ -506,7 +652,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
             let attachmentPayload = null;
             if (attachment?.file) attachmentPayload = await fileToBase64(attachment.file);
 
-            const BATCH_SIZE = 5; 
+            const BATCH_SIZE = (type === 'mcq') ? 3 : 5; // Reduced batch size for MCQs to avoid tokens limit
             const totalBatches = Math.ceil(count / BATCH_SIZE);
             let accumulatedResults = [];
 
@@ -532,8 +678,11 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
 
                 try {
                     const batchResult = await generateContent(apiKey, prompt, combinedContext, systemInstruction, attachmentPayload, currentBatchCount);
+                    // Safe handling for result + data validation
                     const safeResult = Array.isArray(batchResult) ? batchResult : (batchResult ? [batchResult] : []);
-                    accumulatedResults = [...accumulatedResults, ...safeResult];
+                    const validatedResult = validateAndFixData(safeResult, type); // Use sanitizer
+                    
+                    accumulatedResults = [...accumulatedResults, ...validatedResult];
                 } catch (batchError) { 
                     console.error(batchError); break; 
                 }
@@ -654,20 +803,11 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
                                  <BookOpen size={18}/> Study Flashcards
                              </button>
                         </div>
-                        
-                        {/* Quiz Mode Toggle & Button */}
-                        <div className="bg-white p-4 rounded-xl border border-slate-200">
-                            <div className="flex justify-between items-center mb-3">
-                                <span className="font-bold text-slate-700">Quiz Mode</span>
-                                <div className="flex bg-slate-100 rounded-lg p-1">
-                                    <button onClick={() => toggleQuizMode('practice')} className={`px-3 py-1 rounded-md text-xs font-bold transition ${(!deck.quizMode || deck.quizMode === 'practice') ? 'bg-white shadow text-emerald-600' : 'text-slate-500'}`}>Practice</button>
-                                    <button onClick={() => toggleQuizMode('exam')} className={`px-3 py-1 rounded-md text-xs font-bold transition ${deck.quizMode === 'exam' ? 'bg-white shadow text-emerald-600' : 'text-slate-500'}`}>Exam</button>
-                                </div>
-                            </div>
-                            <button onClick={() => onUpdateDeck({...deck, mode: 'quiz'})} disabled={!deck.quiz?.length} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                                <Brain size={18}/> Start Quiz
-                            </button>
-                        </div>
+
+                        <button onClick={() => onUpdateDeck({...deck, mode: 'quiz'})} disabled={!deck.quiz?.length} className="group w-full bg-white border border-slate-200 hover:border-emerald-500 hover:shadow-md p-4 rounded-xl text-left transition disabled:opacity-50">
+                            <div className="flex items-center justify-between mb-1"><span className="font-bold text-slate-800 group-hover:text-emerald-600">Practice Quiz</span><Brain size={20} className="text-emerald-500"/></div>
+                            <p className="text-sm text-slate-500">Test retention.</p>
+                        </button>
                     </div>
                 </div>
             </div>
@@ -685,116 +825,6 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
         </div>
     );
 };
-
-// --- MANAGE CONTENT MODAL ---
-const ManageModal = ({ type, items, onClose, onDeleteItem, onDeleteAll }) => {
-    return (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col">
-                <div className="flex justify-between items-center p-6 border-b">
-                    <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
-                        {type === 'flashcards' ? <BookOpen className="text-indigo-500"/> : <Brain className="text-emerald-500"/>}
-                        Manage {type === 'flashcards' ? 'Flashcards' : 'Quiz Questions'}
-                    </h3>
-                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition"><X size={24}/></button>
-                </div>
-                
-                <div className="flex-1 overflow-y-auto p-4 custom-scroll">
-                    {items.length === 0 ? (
-                        <div className="text-center text-slate-400 py-12">No items to show.</div>
-                    ) : (
-                        <div className="space-y-2">
-                            {items.map((item, i) => {
-                                // Calculate visual status badge for List Item
-                                const status = type === 'flashcards' ? getCardStatus(item) : null;
-                                
-                                return (
-                                    <div key={i} className="flex items-start gap-3 p-3 bg-slate-50 rounded-lg border border-slate-100 group hover:border-slate-300 transition">
-                                        <div className="flex flex-col items-center gap-1 mt-1">
-                                            <span className="text-xs font-bold text-slate-400">{i + 1}.</span>
-                                            {status && (
-                                                <div className={`w-2 h-2 rounded-full ${status.color.replace('text-', 'bg-').split(' ')[0]}`} title={status.label}></div>
-                                            )}
-                                        </div>
-                                        <div className="flex-1 text-sm text-slate-700">
-                                            <div className="font-medium mb-1 flex items-center gap-2">
-                                                <FormattedText text={item.q} />
-                                                {status && <span className={`text-[10px] px-1.5 py-0.5 rounded border ${status.color}`}>{status.label}</span>}
-                                            </div>
-                                            <div className="text-xs text-slate-500 line-clamp-1 opacity-70">
-                                                {type === 'flashcards' ? <FormattedText text={item.a} /> : 'Multiple Choice'}
-                                            </div>
-                                        </div>
-                                        <button 
-                                            onClick={() => onDeleteItem(i)}
-                                            className="text-slate-400 hover:text-red-500 p-1 opacity-0 group-hover:opacity-100 transition"
-                                            title="Delete Item"
-                                        >
-                                            <Trash2 size={16}/>
-                                        </button>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    )}
-                </div>
-
-                <div className="p-4 border-t bg-slate-50 rounded-b-xl flex justify-between items-center">
-                    <span className="text-xs text-slate-500">{items.length} items total</span>
-                    <button 
-                        onClick={onDeleteAll}
-                        className="text-sm text-red-600 hover:text-red-800 font-medium flex items-center gap-2 px-4 py-2 hover:bg-red-50 rounded-lg transition"
-                    >
-                        <Trash2 size={16}/> Delete All
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-};
-
-// --- NAME INPUT MODAL ---
-const NameModal = ({ isOpen, type, initialValue, onClose, onSave }) => {
-    const [value, setValue] = useState(initialValue);
-    const inputRef = useRef(null);
-
-    useEffect(() => {
-        if (isOpen) {
-            setValue(initialValue);
-            setTimeout(() => inputRef.current?.focus(), 100);
-        }
-    }, [isOpen, initialValue]);
-
-    if (!isOpen) return null;
-
-    const handleSubmit = (e) => {
-        e.preventDefault();
-        if (value.trim()) onSave(value.trim());
-    };
-
-    return (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
-                <h3 className="font-bold text-lg text-slate-800 mb-4">{type === 'create' ? 'New Folder' : 'Rename Folder'}</h3>
-                <form onSubmit={handleSubmit}>
-                    <input 
-                        ref={inputRef}
-                        type="text" 
-                        value={value} 
-                        onChange={(e) => setValue(e.target.value)}
-                        className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none mb-4 text-slate-800"
-                        placeholder="Folder Name"
-                    />
-                    <div className="flex gap-2 justify-end">
-                        <button type="button" onClick={onClose} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition text-sm">Cancel</button>
-                        <button type="submit" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition text-sm font-bold">Save</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    );
-};
-
 
 const FlashcardStudy = ({ cards, onBack, apiKey, onUpdateDeck, deck }) => {
     // Determine Mode
