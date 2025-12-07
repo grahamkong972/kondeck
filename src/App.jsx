@@ -19,7 +19,6 @@ import {
 } from "firebase/firestore";
 
 // --- CONFIGURATION ---
-// This is your actual Firebase project config
 const firebaseConfig = {
   apiKey: "AIzaSyCqowVnkUXzjgutGHRKKptEm5NjCl7C4yQ",
   authDomain: "studygenie-691e5.firebaseapp.com",
@@ -111,7 +110,6 @@ const FormattedText = ({ text, className = "" }) => {
 };
 
 // --- GEMINI AI SERVICE (DIRECT CLIENT MODE) ---
-// Uses the user's provided API Key directly. No paywall.
 const generateContent = async (apiKey, prompt, context, systemInstruction, attachmentData = null, quantity = 1) => {
     if (!apiKey) throw new Error("API Key is missing. Please add your own Google Gemini Key in Settings.");
 
@@ -138,7 +136,12 @@ const generateContent = async (apiKey, prompt, context, systemInstruction, attac
     // Helper to cleanup and parse response
     const parseResponse = (text) => {
         let cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
+        
+        // NUCLEAR FIX for "Bad escaped character"
+        // This regex finds any backslash that is NOT followed by a valid JSON escape char (", \, /, b, f, n, r, t, u)
+        // It replaces it with a double backslash. This fixes LaTeX like \alpha -> \\alpha without breaking \n -> \\n
         cleanText = cleanText.replace(/\\(?!["\\/bfnrtu])/g, "\\\\");
+
         try {
             return JSON.parse(cleanText);
         } catch (e) {
