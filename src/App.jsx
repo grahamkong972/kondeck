@@ -4,7 +4,8 @@ import {
     Plus, Trash2, GraduationCap, FileText, Sparkles, 
     RotateCw, CheckCircle, XCircle, Folder, ChevronDown,
     Mic, Presentation, BookOpenText, PieChart, AlertCircle,
-    LayoutDashboard, Image as ImageIcon, X, FileType, LogOut, Lock, Mail, Edit3, Edit2
+    LayoutDashboard, Image as ImageIcon, X, FileType, LogOut, Lock, Mail, Edit3, Edit2,
+    Clock, Layers, Zap
 } from 'lucide-react';
 
 // --- UTILS ---
@@ -426,7 +427,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
     const [attachment, setAttachment] = useState(null);
     
     // Management Modal State
-    const [manageMode, setManageMode] = useState(null); // 'flashcards' | 'quiz' | null
+    const [manageMode, setManageMode] = useState(null); 
 
     const [inputs, setInputs] = useState({ notes: "", transcript: "", slides: "" });
 
@@ -471,6 +472,11 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
         }
     };
 
+    // Mode Toggle
+    const toggleStudyMode = (mode) => {
+        onUpdateDeck({ ...deck, studyMode: mode });
+    };
+
     const handleGenerate = async () => {
         const hasText = inputs.notes.trim() || inputs.transcript.trim() || inputs.slides.trim();
         const hasAttachment = !!attachment;
@@ -492,9 +498,8 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
             const totalBatches = Math.ceil(count / BATCH_SIZE);
             let accumulatedResults = [];
 
-            // OVERLAP PREVENTION: Grab a sample of EXISTING items to exclude
+            // OVERLAP PREVENTION
             const existingItems = genType === "flashcards" ? (deck.cards || []) : (deck.quiz || []);
-            // Take the last 30 items to provide fresh context to the AI
             const existingSample = existingItems.slice(-30).map(item => item.q.substring(0, 30)).join(" | ");
 
             for (let i = 0; i < totalBatches; i++) {
@@ -504,7 +509,6 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
                 const itemsRemaining = count - accumulatedResults.length;
                 const currentBatchCount = Math.min(BATCH_SIZE, itemsRemaining);
                 
-                // Combine existing items + new items from this session to avoid repeats
                 const currentSessionSample = accumulatedResults.map(item => item.q.substring(0, 30)).join(" | ");
                 const exclusionList = `${existingSample} | ${currentSessionSample}`;
                 
@@ -516,7 +520,6 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
 
                 try {
                     const batchResult = await generateContent(apiKey, prompt, combinedContext, systemInstruction, attachmentPayload, currentBatchCount);
-                    // Safe handling for result
                     const safeResult = Array.isArray(batchResult) ? batchResult : (batchResult ? [batchResult] : []);
                     accumulatedResults = [...accumulatedResults, ...safeResult];
                 } catch (batchError) { 
@@ -605,10 +608,19 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
                         </div>
                     </div>
                     <div className="space-y-3">
-                        <button onClick={() => onUpdateDeck({...deck, mode: 'flashcards'})} disabled={!deck.cards?.length} className="group w-full bg-white border border-slate-200 hover:border-indigo-500 hover:shadow-md p-4 rounded-xl text-left transition disabled:opacity-50">
-                            <div className="flex items-center justify-between mb-1"><span className="font-bold text-slate-800 group-hover:text-indigo-600">Study Flashcards</span><BookOpen size={20} className="text-indigo-500"/></div>
-                            <p className="text-sm text-slate-500">Review terms.</p>
-                        </button>
+                        <div className="bg-white p-4 rounded-xl border border-slate-200">
+                             <div className="flex justify-between items-center mb-3">
+                                 <span className="font-bold text-slate-700">Study Mode</span>
+                                 <div className="flex bg-slate-100 rounded-lg p-1">
+                                     <button onClick={() => toggleStudyMode('standard')} className={`px-3 py-1 rounded-md text-xs font-bold transition ${(!deck.studyMode || deck.studyMode === 'standard') ? 'bg-white shadow text-indigo-600' : 'text-slate-500'}`}>Standard</button>
+                                     <button onClick={() => toggleStudyMode('srs')} className={`px-3 py-1 rounded-md text-xs font-bold transition ${deck.studyMode === 'srs' ? 'bg-white shadow text-indigo-600' : 'text-slate-500'}`}>Smart</button>
+                                 </div>
+                             </div>
+                             <button onClick={() => onUpdateDeck({...deck, mode: 'flashcards'})} disabled={!deck.cards?.length} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                                 <BookOpen size={18}/> Study Flashcards
+                             </button>
+                        </div>
+
                         <button onClick={() => onUpdateDeck({...deck, mode: 'quiz'})} disabled={!deck.quiz?.length} className="group w-full bg-white border border-slate-200 hover:border-emerald-500 hover:shadow-md p-4 rounded-xl text-left transition disabled:opacity-50">
                             <div className="flex items-center justify-between mb-1"><span className="font-bold text-slate-800 group-hover:text-emerald-600">Practice Quiz</span><Brain size={20} className="text-emerald-500"/></div>
                             <p className="text-sm text-slate-500">Test retention.</p>
@@ -631,67 +643,190 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
     );
 };
 
-const FlashcardStudy = ({ cards, onBack, apiKey }) => {
+const FlashcardStudy = ({ cards, onBack, apiKey, onUpdateDeck, deck }) => {
+    // Determine Mode
+    const mode = deck.studyMode || 'standard';
+    const isSRS = mode === 'srs';
+
+    // SRS STATE (Only used if isSRS is true)
+    const [dueQueue, setDueQueue] = useState([]);
+    
+    // STANDARD STATE (Only used if isSRS is false)
     const [idx, setIdx] = useState(0);
+
+    const [currentCard, setCurrentCard] = useState(null);
     const [flipped, setFlipped] = useState(false);
     const [aiHelp, setAiHelp] = useState(null);
     const [loadingHelp, setLoadingHelp] = useState(false);
-    const card = cards[idx];
+    const [sessionComplete, setSessionComplete] = useState(false);
 
-    const next = useCallback(() => { setFlipped(false); setAiHelp(null); setIdx((prev) => (prev + 1) % cards.length); }, [cards.length]);
-    const prev = useCallback(() => { setFlipped(false); setAiHelp(null); setIdx((prev) => (prev - 1 + cards.length) % cards.length); }, [cards.length]);
-
+    // Initialization logic
     useEffect(() => {
-        const h = (e) => { if (e.code === 'Space') { e.preventDefault(); setFlipped(p=>!p); } else if (e.code === 'ArrowRight') next(); else if (e.code === 'ArrowLeft') prev(); };
+        if (isSRS) {
+            // SRS Init: Filter for due cards
+            const now = Date.now();
+            const queue = cards
+                .map((c, i) => ({ ...c, originalIndex: i }))
+                .filter(c => !c.nextReview || c.nextReview <= now);
+            
+            setDueQueue(queue);
+            if (queue.length > 0) setCurrentCard(queue[0]);
+            else setSessionComplete(true);
+        } else {
+            // Standard Init: Just show first card
+            if (cards.length > 0) setCurrentCard(cards[0]);
+            else setSessionComplete(true); // Empty deck
+        }
+    }, [isSRS, cards]);
+
+    // STANDARD NAVIGATION
+    const nextStandard = useCallback(() => { 
+        setFlipped(false); setAiHelp(null); 
+        const nextIdx = (idx + 1) % cards.length;
+        setIdx(nextIdx);
+        setCurrentCard(cards[nextIdx]);
+    }, [idx, cards]);
+
+    const prevStandard = useCallback(() => { 
+        setFlipped(false); setAiHelp(null); 
+        const prevIdx = (idx - 1 + cards.length) % cards.length;
+        setIdx(prevIdx);
+        setCurrentCard(cards[prevIdx]);
+    }, [idx, cards]);
+
+    // SRS RATING HANDLER
+    const handleRate = (intervalMinutes) => {
+        const now = Date.now();
+        const nextReview = now + (intervalMinutes * 60 * 1000);
+        
+        // Update main deck
+        const updatedCards = [...cards];
+        const cardIndex = currentCard.originalIndex; // Need original index for SRS updates
+        if (cardIndex !== undefined) {
+             updatedCards[cardIndex] = { ...cards[cardIndex], nextReview };
+             onUpdateDeck({ ...deck, cards: updatedCards });
+        }
+
+        // Update Queue
+        let newQueue = dueQueue.slice(1);
+        if (intervalMinutes < 10) {
+             // Re-queue card at end if "Again" or "Hard"
+             if (intervalMinutes === 1) newQueue.push({ ...currentCard, nextReview, originalIndex: cardIndex });
+        }
+        
+        setFlipped(false);
+        setAiHelp(null);
+        setDueQueue(newQueue);
+        
+        if (newQueue.length > 0) setCurrentCard(newQueue[0]);
+        else setSessionComplete(true);
+    };
+
+    // Keyboard Shortcuts
+    useEffect(() => {
+        const h = (e) => { 
+            if (e.code === 'Space') { e.preventDefault(); setFlipped(p=>!p); } 
+            else if (!isSRS && e.code === 'ArrowRight') nextStandard(); 
+            else if (!isSRS && e.code === 'ArrowLeft') prevStandard(); 
+        };
         window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h);
-    }, [next, prev]);
+    }, [isSRS, nextStandard, prevStandard]);
 
     const getHelp = async (type) => {
         if (loadingHelp) return;
-        
+        if (!apiKey) return alert("Need API Key");
         setLoadingHelp(true);
         try {
-            const res = await generateContent(apiKey, `Provide a ${type} for: Q: ${card.q}, A: ${card.a}. Return JSON: {"text": "..."}`, "");
+            const res = await generateContent(apiKey, `Provide a ${type} for: Q: ${currentCard.q}, A: ${currentCard.a}. Return JSON: {"text": "..."}`, "");
             setAiHelp(res.text);
         } catch(e) { alert("AI Error"); }
         finally { setLoadingHelp(false); }
     };
 
+    if (sessionComplete) {
+         if (isSRS) {
+             const nextDue = cards.map(c => c.nextReview || 0).sort((a,b) => a-b)[0];
+             const date = new Date(nextDue);
+             return (
+                 <div className="h-full flex flex-col items-center justify-center p-8 text-center">
+                     <div className="bg-emerald-100 p-6 rounded-full mb-6 text-emerald-600"><CheckCircle size={48}/></div>
+                     <h2 className="text-3xl font-bold text-slate-800 mb-2">Review Complete!</h2>
+                     <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 mt-6 flex items-center gap-3">
+                         <Clock className="text-indigo-500"/>
+                         <span className="text-sm font-medium text-slate-600">Next review: <strong>{nextDue ? date.toLocaleTimeString() : "Now"}</strong></span>
+                     </div>
+                     <button onClick={onBack} className="mt-12 px-6 py-3 bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition">Back to Dashboard</button>
+                 </div>
+             );
+         } else {
+             return <div className="h-full flex items-center justify-center">No cards available.</div>;
+         }
+    }
+    
+    if (!currentCard) return <div>Loading...</div>;
+
     return (
         <div className="h-full flex flex-col p-6 max-w-4xl mx-auto w-full">
             <button onClick={onBack} className="self-start mb-4 flex gap-2 text-slate-500 hover:text-indigo-600 font-medium"><ChevronLeft/> Back</button>
             <div className="flex-1 flex flex-col items-center justify-center relative perspective-1000">
-                <button onClick={prev} className="absolute left-0 p-3 bg-white rounded-full shadow hover:scale-110 transition z-10"><ChevronLeft/></button>
-                <button onClick={next} className="absolute right-0 p-3 bg-white rounded-full shadow hover:scale-110 transition z-10"><ChevronRight/></button>
+                
+                {/* Standard Mode Arrows */}
+                {!isSRS && (
+                    <>
+                        <button onClick={prevStandard} className="absolute left-0 p-3 bg-white rounded-full shadow hover:scale-110 transition z-10"><ChevronLeft/></button>
+                        <button onClick={nextStandard} className="absolute right-0 p-3 bg-white rounded-full shadow hover:scale-110 transition z-10"><ChevronRight/></button>
+                    </>
+                )}
+
                 <div className="w-full max-w-2xl h-96 relative cursor-pointer" onClick={() => setFlipped(!flipped)}>
                     <div className="w-full h-full relative shadow-2xl rounded-2xl" style={{ transformStyle: 'preserve-3d', transition: 'transform 0.6s', transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)' }}>
                         <div className="absolute w-full h-full bg-white rounded-2xl backface-hidden flex flex-col items-center justify-center p-8 border" style={{ backfaceVisibility: 'hidden' }}>
-                            <div className="text-2xl font-medium text-center"><FormattedText text={card.q}/></div>
+                            <div className="text-2xl font-medium text-center"><FormattedText text={currentCard.q}/></div>
                             <div className="absolute bottom-6 text-slate-400 text-sm animate-pulse">Click to Flip</div>
                         </div>
                         <div className="absolute w-full h-full bg-indigo-600 rounded-2xl backface-hidden flex flex-col items-center justify-center p-8 text-white" style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}>
-                            <div className="text-xl font-medium text-center overflow-y-auto max-h-full custom-scroll"><FormattedText text={card.a}/></div>
+                            <div className="text-xl font-medium text-center overflow-y-auto max-h-full custom-scroll"><FormattedText text={currentCard.a}/></div>
+                            
+                            {/* AI Helper Actions (Always Visible on Back) */}
                             <div className="absolute bottom-6 flex gap-2" onClick={e => e.stopPropagation()}>
-                                <button 
-                                    onClick={() => getHelp('simplify')} 
-                                    disabled={loadingHelp}
-                                    className="px-3 py-1 bg-white/20 hover:bg-white/30 disabled:opacity-50 disabled:cursor-wait rounded-full text-xs font-bold border border-white/10 flex items-center gap-1"
-                                >
-                                    {loadingHelp ? <RotateCw className="animate-spin" size={12}/> : null} Simplify
-                                </button>
-                                <button 
-                                    onClick={() => getHelp('mnemonic')} 
-                                    disabled={loadingHelp}
-                                    className="px-3 py-1 bg-white/20 hover:bg-white/30 disabled:opacity-50 disabled:cursor-wait rounded-full text-xs font-bold border border-white/10 flex items-center gap-1"
-                                >
-                                    {loadingHelp ? <RotateCw className="animate-spin" size={12}/> : null} Mnemonic
-                                </button>
+                                <button onClick={() => getHelp('simplify')} disabled={loadingHelp} className="px-3 py-1 bg-white/20 hover:bg-white/30 rounded-full text-xs font-bold border border-white/10 flex items-center gap-1">{loadingHelp ? <RotateCw className="animate-spin" size={12}/> : null} Simplify</button>
+                                <button onClick={() => getHelp('mnemonic')} disabled={loadingHelp} className="px-3 py-1 bg-white/20 hover:bg-white/30 rounded-full text-xs font-bold border border-white/10 flex items-center gap-1">{loadingHelp ? <RotateCw className="animate-spin" size={12}/> : null} Mnemonic</button>
                             </div>
                         </div>
                     </div>
                 </div>
+                
+                {/* SRS Controls - Only show when flipped and in SRS Mode */}
+                {isSRS && flipped && (
+                    <div className="mt-8 flex gap-3 animate-fade-in-up">
+                        <button onClick={() => handleRate(1)} className="flex flex-col items-center px-6 py-3 bg-red-100 hover:bg-red-200 text-red-700 rounded-xl transition border-b-4 border-red-200 hover:border-red-300 active:border-b-0 active:translate-y-1">
+                            <span className="font-bold">Again</span><span className="text-[10px] opacity-70">1m</span>
+                        </button>
+                        <button onClick={() => handleRate(10)} className="flex flex-col items-center px-6 py-3 bg-orange-100 hover:bg-orange-200 text-orange-700 rounded-xl transition border-b-4 border-orange-200 hover:border-orange-300 active:border-b-0 active:translate-y-1">
+                            <span className="font-bold">Hard</span><span className="text-[10px] opacity-70">10m</span>
+                        </button>
+                        <button onClick={() => handleRate(1440)} className="flex flex-col items-center px-6 py-3 bg-emerald-100 hover:bg-emerald-200 text-emerald-700 rounded-xl transition border-b-4 border-emerald-200 hover:border-emerald-300 active:border-b-0 active:translate-y-1">
+                            <span className="font-bold">Good</span><span className="text-[10px] opacity-70">1d</span>
+                        </button>
+                        <button onClick={() => handleRate(5760)} className="flex flex-col items-center px-6 py-3 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-xl transition border-b-4 border-blue-200 hover:border-blue-300 active:border-b-0 active:translate-y-1">
+                            <span className="font-bold">Easy</span><span className="text-[10px] opacity-70">4d</span>
+                        </button>
+                    </div>
+                )}
+                
+                {/* Standard Mode Navigation Hint */}
+                {!isSRS && flipped && (
+                     <div className="mt-8">
+                         <button onClick={nextStandard} className="px-8 py-3 bg-slate-800 text-white rounded-full font-bold shadow-lg hover:bg-slate-700 transition">Next Card</button>
+                     </div>
+                )}
+
                 {aiHelp && <div className="mt-6 bg-white p-4 rounded-lg shadow border border-indigo-100 max-w-xl w-full text-sm text-slate-700 animate-fade-in"><strong className="text-indigo-600 block mb-1">AI Helper:</strong> <FormattedText text={aiHelp}/></div>}
-                <div className="mt-8 text-slate-400 font-medium">Card {idx + 1} / {cards.length}</div>
+                
+                {/* Progress Indicator */}
+                <div className="mt-8 text-slate-400 font-medium">
+                    {isSRS ? `Queue: ${dueQueue.length} remaining` : `Card ${idx + 1} / ${cards.length}`}
+                </div>
             </div>
         </div>
     );
