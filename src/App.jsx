@@ -244,7 +244,14 @@ const FlashcardStudy = ({ cards, onBack, apiKey }) => {
 
                 {/* Card */}
                 <div className="w-full max-w-2xl h-96 relative cursor-pointer group" onClick={() => setFlipped(!flipped)}>
-                    <div className={`transition-transform duration-700 w-full h-full relative transform-style-3d shadow-2xl rounded-2xl ${flipped ? 'rotate-y-180' : ''}`} style={{ transformStyle: 'preserve-3d', transition: 'transform 0.6s' }}>
+                    <div 
+                        className="w-full h-full relative shadow-2xl rounded-2xl" 
+                        style={{ 
+                            transformStyle: 'preserve-3d', 
+                            transition: 'transform 0.6s',
+                            transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)'
+                        }}
+                    >
                         {/* Front */}
                         <div className="absolute w-full h-full bg-white rounded-2xl backface-hidden flex flex-col items-center justify-center p-8 border border-slate-200" style={{ backfaceVisibility: 'hidden' }}>
                             <span className="absolute top-6 left-6 text-xs font-bold tracking-wider text-slate-400 uppercase">Question</span>
