@@ -98,7 +98,8 @@ const validateAndFixData = (data, type) => {
             return {
                 type: 'saq', // Tag as SAQ for ExamRunner
                 q: String(item.q || "Error: Question missing"),
-                model: String(item.model || "No model answer provided.")
+                model: String(item.model || "No model answer provided."),
+                marks: typeof item.marks === 'number' ? item.marks : 5 // Default to 5 marks if missing (backward compatibility)
             };
         }
         return item;
@@ -321,7 +322,7 @@ const ExamSetupModal = ({ modules, onClose, onStartExam }) => {
     const mcqMarks = Math.round(totalMarks * (mcqPercentage / 100));
     const saqMarks = totalMarks - mcqMarks;
     const numMCQs = mcqMarks;
-    const numSAQs = Math.max(1, Math.round(saqMarks / 10)); // Ensure at least 1 if marks exist
+    const numSAQs = Math.max(1, Math.round(saqMarks / 5)); // Changed: Divide by 5 for estimated 5-mark SAQs avg
 
     const toggleModule = (id) => {
         setSelectedModuleIds(prev => prev.includes(id) ? prev.filter(m => m !== id) : [...prev, id]);
@@ -404,7 +405,6 @@ const ExamRunner = ({ questions, timeLimit, onBack, apiKey }) => {
     const mcqQuestions = questions.filter(q => q.type !== 'saq');
     const mcqCount = mcqQuestions.length;
     const mcqScore = mcqQuestions.reduce((acc, q) => {
-        // Find index of this question in the original array to lookup answer
         const idx = questions.indexOf(q);
         if (answers[idx] === q.a) return acc + 1;
         return acc;
@@ -416,7 +416,8 @@ const ExamRunner = ({ questions, timeLimit, onBack, apiKey }) => {
         try {
             const q = questions[index];
             const userAns = answers[index] || "No answer provided.";
-            const prompt = `Grade this SAQ out of 10. Question: "${q.q}". Model: "${q.model}". Student: "${userAns}". Return JSON: { "score": number, "feedback": "string", "missing": "string" }`;
+            const marks = q.marks || 5;
+            const prompt = `Grade this SAQ out of ${marks}. Question: "${q.q}". Model: "${q.model}". Student: "${userAns}". Return JSON: { "score": number, "feedback": "string", "missing": "string" }`;
             const result = await generateContent(apiKey, prompt, "", "");
             setSaqFeedback(prev => ({ ...prev, [index]: result }));
         } catch (e) { alert(e.message); } 
@@ -457,8 +458,10 @@ const ExamRunner = ({ questions, timeLimit, onBack, apiKey }) => {
                             <div className="flex gap-3 mb-4">
                                 <span className="font-bold text-slate-400">{idx + 1}.</span>
                                 <div className="flex-1">
-                                    <div className="font-medium text-lg text-slate-800"><FormattedText text={q.q}/></div>
-                                    {isSAQ && <span className="inline-block mt-2 px-2 py-1 bg-purple-100 text-purple-700 text-xs font-bold rounded">Short Answer (10 Marks)</span>}
+                                    <div className="font-medium text-lg text-slate-800">
+                                        <FormattedText text={`${q.q} ${isSAQ ? `(${q.marks || 5} marks)` : ''}`}/>
+                                    </div>
+                                    {isSAQ && <span className="inline-block mt-2 px-2 py-1 bg-purple-100 text-purple-700 text-xs font-bold rounded">Short Answer</span>}
                                 </div>
                             </div>
                             {isSAQ ? (
@@ -484,7 +487,7 @@ const ExamRunner = ({ questions, timeLimit, onBack, apiKey }) => {
                                                 <div className="bg-purple-50 p-4 rounded-lg border border-purple-100 animate-fade-in">
                                                     <div className="flex justify-between items-center mb-2">
                                                         <span className="font-bold text-purple-800">AI Feedback</span>
-                                                        <span className="bg-white px-2 py-1 rounded text-xs font-bold text-purple-600 border border-purple-200">Score: {saqFeedback[idx].score}/10</span>
+                                                        <span className="bg-white px-2 py-1 rounded text-xs font-bold text-purple-600 border border-purple-200">Score: {saqFeedback[idx].score}/{q.marks || 5}</span>
                                                     </div>
                                                     <p className="text-sm text-purple-900 mb-2">{saqFeedback[idx].feedback}</p>
                                                     {saqFeedback[idx].missing && <div className="text-xs text-red-600 mt-2 pt-2 border-t border-purple-100"><strong>Missing:</strong> {saqFeedback[idx].missing}</div>}
@@ -538,14 +541,15 @@ const SAQMode = ({ questions, onBack, apiKey }) => {
         if (!apiKey) return alert("API Key missing.");
 
         setGrading(true);
+        const marks = question.marks || 5;
         try {
             const prompt = `
                 Act as a strict university professor. 
-                QUESTION: "${question.q}"
+                QUESTION: "${question.q}" (Worth ${marks} marks)
                 MODEL ANSWER: "${question.model}"
                 STUDENT ANSWER: "${userAnswer}"
                 
-                TASK: Grade the student answer out of 10. Be critical but constructive.
+                TASK: Grade the student answer out of ${marks}. Be critical but constructive.
                 RETURN JSON: { "score": number, "feedback": "Specific feedback", "missing": "Concepts missed" }
             `;
             const result = await generateContent(apiKey, prompt, "", "");
@@ -564,7 +568,7 @@ const SAQMode = ({ questions, onBack, apiKey }) => {
             <div className="flex-1 overflow-y-auto custom-scroll">
                 <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 mb-6">
                     <h3 className="text-xs font-bold text-slate-400 uppercase mb-2">Question</h3>
-                    <div className="text-xl font-medium text-slate-800"><FormattedText text={question.q}/></div>
+                    <div className="text-xl font-medium text-slate-800"><FormattedText text={`${question.q} (${question.marks || 5} marks)`}/></div>
                 </div>
                 <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 mb-6">
                     <textarea 
@@ -586,7 +590,7 @@ const SAQMode = ({ questions, onBack, apiKey }) => {
                     <div className="bg-white p-6 rounded-xl shadow-lg border border-indigo-100 animate-fade-in-up mb-20">
                         <div className="flex items-center justify-between mb-4 pb-4 border-b border-slate-100">
                             <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2"><Sparkles className="text-indigo-500" size={20}/> AI Grading</h3>
-                            <div className={`px-4 py-1 rounded-full text-sm font-bold ${feedback.score >= 7 ? 'bg-emerald-100 text-emerald-700' : feedback.score >= 5 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>Score: {feedback.score}/10</div>
+                            <div className={`px-4 py-1 rounded-full text-sm font-bold ${feedback.score >= (question.marks || 5)*0.7 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>Score: {feedback.score}/{question.marks || 5}</div>
                         </div>
                         <div className="space-y-4">
                             <div><h4 className="text-xs font-bold text-slate-400 uppercase mb-1">Feedback</h4><p className="text-sm text-slate-700 leading-relaxed"><FormattedText text={feedback.feedback}/></p></div>
@@ -724,185 +728,6 @@ const NameModal = ({ isOpen, type, initialValue, onClose, onSave }) => {
     );
 };
 
-// ... ModuleDashboard, FolderDashboard, FlashcardStudy, QuizMode from previous blocks ...
-// (I will construct the final FolderDashboard with exam integration and ModuleDashboard with SAQ integration here)
-
-const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }) => {
-    const [isAnalyzing, setIsAnalyzing] = useState(false);
-    const [syllabusText, setSyllabusText] = useState(folder.syllabus || "");
-    const [isGlobalStudy, setIsGlobalStudy] = useState(false);
-    
-    // NEW: Exam Setup State
-    const [showExamSetup, setShowExamSetup] = useState(false);
-    const [activeExamData, setActiveExamData] = useState(null); // For global exam
-    const [examTimeLimit, setExamTimeLimit] = useState(0); // Add state for time limit
-
-    useEffect(() => { setSyllabusText(folder.syllabus || ""); }, [folder.id]);
-    const handleSaveSyllabus = () => onUpdateFolder({ ...folder, syllabus: syllabusText }); 
-
-    const handleAnalyze = async () => {
-        if (!syllabusText.trim()) return alert("Please paste the Course Outline first.");
-        
-        setIsAnalyzing(true);
-        try {
-            const allContent = decks.map(d => `MODULE: ${d.title}\nNOTES: ${d.notes || ''}\nSLIDES: ${d.slides || ''}\nTRANSCRIPT: ${d.transcript || ''}`).join("\n\n----------------\n\n");
-            if (!allContent.trim()) return alert("No content found in modules!");
-
-            const prompt = `Analyze 'STUDENT MATERIALS' against 'OFFICIAL SYLLABUS'. Return JSON: {"score": 0-100, "analysis": "summary", "missing": "missing topics"}`;
-            const context = `OFFICIAL SYLLABUS:\n${syllabusText}\n\nSTUDENT MATERIALS:\n${allContent}`;
-
-            const result = await generateContent(apiKey, prompt, context, "", null, 1);
-            onUpdateFolder({ ...folder, syllabus: syllabusText, coverage: result });
-        } catch (error) { 
-            alert(error.message); 
-        } finally { setIsAnalyzing(false); }
-    };
-
-    // Prepare global deck
-    const globalCards = decks.flatMap(d => (d.cards || []).map(c => ({...c, _deckId: d.id})));
-
-    const handleGlobalUpdate = (updatedGlobalDeck) => {
-        const cardsByDeck = {};
-        updatedGlobalDeck.cards.forEach(c => {
-            if (c._deckId) {
-                if (!cardsByDeck[c._deckId]) cardsByDeck[c._deckId] = [];
-                cardsByDeck[c._deckId].push(c);
-            }
-        });
-
-        Object.keys(cardsByDeck).forEach(deckId => {
-            const originalDeck = decks.find(d => d.id === deckId);
-            if (originalDeck) {
-                onUpdateDeck({ ...originalDeck, cards: cardsByDeck[deckId] });
-            }
-        });
-    };
-
-    // HANDLER FOR STARTING MOCK EXAM
-    const handleStartMockExam = ({ moduleIds, numMCQs, numSAQs, timeLimit }) => {
-        // Pool questions
-        const selectedDecks = decks.filter(d => moduleIds.includes(d.id));
-        
-        // 1. Get MCQs (prioritize 'exams' list, fall back to 'quiz')
-        const allMCQs = selectedDecks.flatMap(d => [...(d.exams || []), ...(d.quiz || [])].map(q => ({...q, type: 'mcq'})));
-        
-        // 2. Get SAQs
-        const allSAQs = selectedDecks.flatMap(d => (d.saqs || []).map(q => ({...q, type: 'saq'})));
-
-        // 3. Shuffle and Slice
-        const shuffledMCQs = allMCQs.sort(() => 0.5 - Math.random()).slice(0, numMCQs);
-        const shuffledSAQs = allSAQs.sort(() => 0.5 - Math.random()).slice(0, numSAQs);
-
-        // 4. Combine (MCQs first, then SAQs is standard exam format)
-        const finalExam = [...shuffledMCQs, ...shuffledSAQs];
-
-        if (finalExam.length === 0) return alert("Not enough questions generated in selected modules.");
-
-        setExamTimeLimit(timeLimit); // Store time limit
-        setActiveExamData(finalExam);
-        setShowExamSetup(false);
-    };
-
-    if (isGlobalStudy) {
-        const virtualDeck = { 
-            id: 'global', 
-            title: `${folder.name} (Global)`, 
-            studyMode: 'srs', // Force SRS for global study usually
-            cards: globalCards 
-        };
-        return <FlashcardStudy 
-            cards={globalCards} 
-            deck={virtualDeck} 
-            apiKey={apiKey} 
-            onUpdateDeck={handleGlobalUpdate}
-            onBack={() => setIsGlobalStudy(false)} 
-        />;
-    }
-
-    // Render Active Global Exam
-    if (activeExamData) {
-         return <ExamRunner questions={activeExamData} timeLimit={examTimeLimit} onBack={() => setActiveExamData(null)} apiKey={apiKey} />;
-    }
-
-    const totalCards = decks.reduce((sum, d) => sum + (d.cards?.length || 0), 0);
-    const totalQuestions = decks.reduce((sum, d) => sum + (d.quiz?.length || 0), 0);
-    const totalExamQs = decks.reduce((sum, d) => sum + (d.exams?.length || 0), 0);
-    const totalSaqs = decks.reduce((sum, d) => sum + (d.saqs?.length || 0), 0); // New stat
-
-    return (
-        <div className="max-w-6xl mx-auto p-6 h-full flex flex-col">
-            <div className="mb-8">
-                <h2 className="text-3xl font-bold text-slate-800 flex items-center gap-3"><Folder size={32} className="text-indigo-500"/> {folder.name} <span className="text-slate-400 text-lg font-normal">/ Course Overview</span></h2>
-            </div>
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 flex-1 min-h-0">
-                <div className="lg:col-span-8 flex flex-col gap-4 h-full">
-                     {/* Syllabus Analysis Panel (Same as before) ... */}
-                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex-1 flex flex-col">
-                        <div className="flex items-center justify-between mb-4">
-                            <h3 className="font-bold text-slate-700 flex items-center gap-2"><BookOpenText size={20} className="text-emerald-500"/> Course Syllabus</h3>
-                            <button onClick={handleSaveSyllabus} className="text-xs text-indigo-600 font-medium hover:underline">Save Text</button>
-                        </div>
-                        <textarea className="flex-1 w-full p-4 bg-slate-50 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-sm font-mono leading-relaxed" placeholder="Paste course outline here..." value={syllabusText} onChange={(e) => setSyllabusText(e.target.value)} onBlur={handleSaveSyllabus}></textarea>
-                        <div className="mt-4">
-                            <button onClick={handleAnalyze} disabled={isAnalyzing} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70">
-                                {isAnalyzing ? <RotateCw className="animate-spin"/> : <PieChart/>} {isAnalyzing ? "Auditing..." : "Analyze Coverage"}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-                <div className="lg:col-span-4 space-y-6 overflow-y-auto">
-                    {/* Content Audit Panel ... */}
-                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                        <h3 className="font-semibold text-slate-700 mb-4 flex items-center gap-2"><CheckCircle size={18} className="text-indigo-500"/> Content Audit</h3>
-                        {folder.coverage ? (
-                            <div className="space-y-4 animate-fade-in">
-                                <div className="flex items-end gap-2">
-                                    <span className={`text-4xl font-bold ${folder.coverage.score >= 80 ? 'text-emerald-600' : folder.coverage.score >= 50 ? 'text-yellow-600' : 'text-red-600'}`}>{folder.coverage.score}%</span>
-                                    <span className="text-sm text-slate-500 mb-1">Coverage Score</span>
-                                </div>
-                                <div className="w-full bg-slate-100 rounded-full h-2"><div className="bg-emerald-500 h-2 rounded-full transition-all duration-1000" style={{ width: `${folder.coverage.score}%` }}></div></div>
-                                <div className="p-3 bg-slate-50 rounded-lg text-sm text-slate-700 border border-slate-100"><FormattedText text={folder.coverage.analysis}/></div>
-                                {folder.coverage.missing && <div className="p-3 bg-red-50 rounded-lg text-sm text-red-700 border border-red-100"><div className="font-bold flex items-center gap-2 mb-1"><AlertCircle size={14}/> Missing:</div><FormattedText text={folder.coverage.missing}/></div>}
-                            </div>
-                        ) : <div className="text-center text-slate-400 py-8 text-sm">Run analysis to check coverage.</div>}
-                    </div>
-                    
-                    {/* Course Totals Updated */}
-                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                        <h3 className="font-semibold text-slate-700 mb-4">Course Totals</h3>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="bg-slate-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-slate-800">{decks.length}</div><div className="text-xs text-slate-500 uppercase">Modules</div></div>
-                            <div className="bg-indigo-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-indigo-600">{totalCards}</div><div className="text-xs text-indigo-400 uppercase">Cards</div></div>
-                            <div className="bg-emerald-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-emerald-600">{totalQuestions}</div><div className="text-xs text-emerald-400 uppercase">Practice</div></div>
-                            <div className="bg-purple-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-purple-600">{totalSaqs}</div><div className="text-xs text-purple-400 uppercase">SAQs</div></div>
-                             <div className="bg-red-50 p-4 rounded-lg text-center col-span-2"><div className="text-2xl font-bold text-red-600">{totalExamQs}</div><div className="text-xs text-red-400 uppercase">Exam Qs</div></div>
-                        </div>
-                    </div>
-                    
-                    {/* GLOBAL BUTTONS */}
-                    <div className="space-y-3">
-                        <div className="bg-gradient-to-br from-indigo-600 to-violet-600 p-6 rounded-xl shadow-md text-white">
-                            <h3 className="font-bold text-lg mb-2 flex items-center gap-2"><Layers/> Global Study</h3>
-                            <button onClick={() => setIsGlobalStudy(true)} disabled={totalCards === 0} className="w-full bg-white text-indigo-600 font-bold py-3 rounded-lg hover:bg-indigo-50 transition disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"><Zap size={18}/> Study All (SRS)</button>
-                        </div>
-                        <div className="bg-gradient-to-br from-red-500 to-rose-600 p-6 rounded-xl shadow-md text-white">
-                            <h3 className="font-bold text-lg mb-2 flex items-center gap-2"><FileQuestion/> Mock Exam</h3>
-                            <button onClick={() => setShowExamSetup(true)} disabled={totalExamQs === 0} className="w-full bg-white text-red-600 font-bold py-3 rounded-lg hover:bg-red-50 transition disabled:opacity-70 flex items-center justify-center gap-2"><Timer size={18}/> Build Exam</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            {showExamSetup && (
-                <ExamSetupModal 
-                    modules={decks} 
-                    onClose={() => setShowExamSetup(false)} 
-                    onStartExam={handleStartMockExam} 
-                />
-            )}
-        </div>
-    );
-};
 
 const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
     const [isGenerating, setIsGenerating] = useState(false);
@@ -1181,87 +1006,173 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
 };
 
 const FlashcardStudy = ({ cards, onBack, apiKey, onUpdateDeck, deck }) => {
+    // Determine Mode
+    const mode = deck.studyMode || 'standard';
+    const isSRS = mode === 'srs';
+
+    // SRS STATE (Only used if isSRS is true)
+    const [dueQueue, setDueQueue] = useState([]);
+    
+    // STANDARD STATE (Only used if isSRS is false)
     const [idx, setIdx] = useState(0);
+
+    const [currentCard, setCurrentCard] = useState(null);
     const [flipped, setFlipped] = useState(false);
     const [aiHelp, setAiHelp] = useState(null);
     const [loadingHelp, setLoadingHelp] = useState(false);
-    const card = cards[idx];
-    const mode = deck.studyMode || 'standard';
-    const isSRS = mode === 'srs';
-    const [dueQueue, setDueQueue] = useState([]);
-    const [currentCard, setCurrentCard] = useState(null);
     const [sessionComplete, setSessionComplete] = useState(false);
 
+    // Initialization logic
     useEffect(() => {
         if (isSRS) {
+            // SRS Init: Filter for due cards
             const now = Date.now();
-            const queue = cards.map((c, i) => ({ ...c, originalIndex: i })).filter(c => !c.nextReview || c.nextReview <= now);
+            const queue = cards
+                .map((c, i) => ({ ...c, originalIndex: i }))
+                .filter(c => !c.nextReview || c.nextReview <= now);
+            
             setDueQueue(queue);
-            if (queue.length > 0) setCurrentCard(queue[0]); else setSessionComplete(true);
+            if (queue.length > 0) setCurrentCard(queue[0]);
+            else setSessionComplete(true);
         } else {
-            if (cards.length > 0) setCurrentCard(cards[0]); else setSessionComplete(true);
+            // Standard Init: Just show first card
+            if (cards.length > 0) setCurrentCard(cards[0]);
+            else setSessionComplete(true); // Empty deck
         }
     }, [isSRS, cards]);
 
-    const nextStandard = useCallback(() => { setFlipped(false); setAiHelp(null); const nextIdx = (idx + 1) % cards.length; setIdx(nextIdx); setCurrentCard(cards[nextIdx]); }, [idx, cards]);
-    const prevStandard = useCallback(() => { setFlipped(false); setAiHelp(null); const prevIdx = (idx - 1 + cards.length) % cards.length; setIdx(prevIdx); setCurrentCard(cards[prevIdx]); }, [idx, cards]);
+    // STANDARD NAVIGATION
+    const nextStandard = useCallback(() => { 
+        setFlipped(false); setAiHelp(null); 
+        const nextIdx = (idx + 1) % cards.length;
+        setIdx(nextIdx);
+        setCurrentCard(cards[nextIdx]);
+    }, [idx, cards]);
 
+    const prevStandard = useCallback(() => { 
+        setFlipped(false); setAiHelp(null); 
+        const prevIdx = (idx - 1 + cards.length) % cards.length;
+        setIdx(prevIdx);
+        setCurrentCard(cards[prevIdx]);
+    }, [idx, cards]);
+
+    // SRS RATING HANDLER
     const handleRate = useCallback((intervalMinutes) => {
+        // Prevent action if no card
         if (!currentCard) return;
+
         const now = Date.now();
         const nextReview = now + (intervalMinutes * 60 * 1000);
+        
+        // Update main deck in Firestore
         const updatedCards = [...cards];
-        const cardIndex = currentCard.originalIndex;
-        if (cardIndex !== undefined) { updatedCards[cardIndex] = { ...cards[cardIndex], nextReview }; onUpdateDeck({ ...deck, cards: updatedCards }); }
+        const cardIndex = currentCard.originalIndex; // Need original index for SRS updates
+        if (cardIndex !== undefined) {
+             updatedCards[cardIndex] = { ...cards[cardIndex], nextReview };
+             onUpdateDeck({ ...deck, cards: updatedCards });
+        }
+
+        // Update Queue for current session
         let newQueue = dueQueue.slice(1);
-        if (intervalMinutes < 10) { const insertPos = Math.min(newQueue.length, Math.floor(Math.random() * 3) + 1); newQueue.splice(insertPos, 0, { ...currentCard, nextReview, originalIndex: cardIndex }); }
-        setFlipped(false); setAiHelp(null); setDueQueue(newQueue);
-        if (newQueue.length > 0) setCurrentCard(newQueue[0]); else setSessionComplete(true);
+        if (intervalMinutes < 10) {
+             // Re-queue card at end if "Again" or "Hard"
+             // Using a random position in the next 3 cards to prevent immediate repetition if queue > 1
+             const insertPos = Math.min(newQueue.length, Math.floor(Math.random() * 3) + 1);
+             const cardToRequeue = { ...currentCard, nextReview, originalIndex: cardIndex };
+             newQueue.splice(insertPos, 0, cardToRequeue);
+        }
+        
+        setFlipped(false);
+        setAiHelp(null);
+        setDueQueue(newQueue);
+        
+        if (newQueue.length > 0) setCurrentCard(newQueue[0]);
+        else setSessionComplete(true);
     }, [currentCard, cards, deck, dueQueue, onUpdateDeck]);
 
+    // Keyboard Shortcuts
     useEffect(() => {
         const h = (e) => { 
-            if (e.code === 'Space') { e.preventDefault(); setFlipped(p=>!p); } 
+            if (e.code === 'Space') { 
+                e.preventDefault(); 
+                setFlipped(p=>!p); 
+            } 
             else if (!isSRS && e.code === 'ArrowRight') nextStandard(); 
             else if (!isSRS && e.code === 'ArrowLeft') prevStandard();
             else if (isSRS && flipped) {
-                if (e.key === '1') handleRate(1); if (e.key === '2') handleRate(10); if (e.key === '3') handleRate(1440); if (e.key === '4') handleRate(5760);
+                // Number shortcuts for SRS
+                if (e.key === '1') handleRate(1);      // Again
+                if (e.key === '2') handleRate(10);     // Hard
+                if (e.key === '3') handleRate(1440);   // Good
+                if (e.key === '4') handleRate(5760);   // Easy
             }
         };
         window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h);
     }, [isSRS, flipped, nextStandard, prevStandard, handleRate]);
 
     const getHelp = async (type) => {
-        if (loadingHelp || !apiKey) return;
+        if (loadingHelp) return;
+        if (!apiKey) return alert("Need API Key");
         setLoadingHelp(true);
-        try { const res = await generateContent(apiKey, `Provide a ${type} for: Q: ${currentCard.q}, A: ${currentCard.a}. Return JSON: {"text": "..."}`, ""); setAiHelp(res.text); } 
-        catch(e) { alert("AI Error"); } finally { setLoadingHelp(false); }
+        try {
+            const res = await generateContent(apiKey, `Provide a ${type} for: Q: ${currentCard.q}, A: ${currentCard.a}. Return JSON: {"text": "..."}`, "");
+            setAiHelp(res.text);
+        } catch(e) { alert("AI Error"); }
+        finally { setLoadingHelp(false); }
     };
 
     if (sessionComplete) {
          if (isSRS) {
              const nextDue = cards.map(c => c.nextReview || 0).sort((a,b) => a-b)[0];
-             return (<div className="h-full flex flex-col items-center justify-center p-8 text-center"><div className="bg-emerald-100 p-6 rounded-full mb-6 text-emerald-600"><CheckCircle size={48}/></div><h2 className="text-3xl font-bold text-slate-800 mb-2">Review Complete!</h2><div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 mt-6 flex items-center gap-3"><Clock className="text-indigo-500"/><span className="text-sm font-medium text-slate-600">Next review: <strong>{nextDue ? new Date(nextDue).toLocaleTimeString() : "Now"}</strong></span></div><button onClick={onBack} className="mt-12 px-6 py-3 bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition">Back to Dashboard</button></div>);
-         } else { return <div className="h-full flex items-center justify-center">No cards available.</div>; }
+             const date = new Date(nextDue);
+             return (
+                 <div className="h-full flex flex-col items-center justify-center p-8 text-center">
+                     <div className="bg-emerald-100 p-6 rounded-full mb-6 text-emerald-600"><CheckCircle size={48}/></div>
+                     <h2 className="text-3xl font-bold text-slate-800 mb-2">Review Complete!</h2>
+                     <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 mt-6 flex items-center gap-3">
+                         <Clock className="text-indigo-500"/>
+                         <span className="text-sm font-medium text-slate-600">Next review: <strong>{nextDue ? date.toLocaleTimeString() : "Now"}</strong></span>
+                     </div>
+                     <button onClick={onBack} className="mt-12 px-6 py-3 bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition">Back to Dashboard</button>
+                 </div>
+             );
+         } else {
+             return <div className="h-full flex items-center justify-center">No cards available.</div>;
+         }
     }
     
     if (!currentCard) return <div>Loading...</div>;
+
+    // Get status for badge
     const status = getCardStatus(currentCard);
 
     return (
         <div className="h-full flex flex-col p-6 max-w-4xl mx-auto w-full">
             <button onClick={onBack} className="self-start mb-4 flex gap-2 text-slate-500 hover:text-indigo-600 font-medium"><ChevronLeft/> Back</button>
             <div className="flex-1 flex flex-col items-center justify-center relative perspective-1000">
-                {!isSRS && (<><button onClick={prevStandard} className="absolute left-0 p-3 bg-white rounded-full shadow hover:scale-110 transition z-10"><ChevronLeft/></button><button onClick={nextStandard} className="absolute right-0 p-3 bg-white rounded-full shadow hover:scale-110 transition z-10"><ChevronRight/></button></>)}
+                
+                {/* Standard Mode Arrows */}
+                {!isSRS && (
+                    <>
+                        <button onClick={prevStandard} className="absolute left-0 p-3 bg-white rounded-full shadow hover:scale-110 transition z-10"><ChevronLeft/></button>
+                        <button onClick={nextStandard} className="absolute right-0 p-3 bg-white rounded-full shadow hover:scale-110 transition z-10"><ChevronRight/></button>
+                    </>
+                )}
+
                 <div className="w-full max-w-2xl h-96 relative cursor-pointer" onClick={() => setFlipped(!flipped)}>
                     <div className="w-full h-full relative shadow-2xl rounded-2xl" style={{ transformStyle: 'preserve-3d', transition: 'transform 0.6s', transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)' }}>
                         <div className="absolute w-full h-full bg-white rounded-2xl backface-hidden flex flex-col items-center justify-center p-8 border" style={{ backfaceVisibility: 'hidden' }}>
-                            <span className={`absolute top-6 right-6 px-3 py-1 rounded-full text-xs font-bold border ${status.color}`}>{status.label}</span>
+                            {/* STATUS BADGE */}
+                            <span className={`absolute top-6 right-6 px-3 py-1 rounded-full text-xs font-bold border ${status.color}`}>
+                                {status.label}
+                            </span>
                             <div className="text-2xl font-medium text-center"><FormattedText text={currentCard.q}/></div>
                             <div className="absolute bottom-6 text-slate-400 text-sm animate-pulse">Click to Flip</div>
                         </div>
                         <div className="absolute w-full h-full bg-indigo-600 rounded-2xl backface-hidden flex flex-col items-center justify-center p-8 text-white" style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}>
                             <div className="text-xl font-medium text-center overflow-y-auto max-h-full custom-scroll"><FormattedText text={currentCard.a}/></div>
+                            
+                            {/* AI Helper Actions (Always Visible on Back) */}
                             <div className="absolute bottom-6 flex gap-2" onClick={e => e.stopPropagation()}>
                                 <button onClick={() => getHelp('simplify')} disabled={loadingHelp} className="px-3 py-1 bg-white/20 hover:bg-white/30 rounded-full text-xs font-bold border border-white/10 flex items-center gap-1">{loadingHelp ? <RotateCw className="animate-spin" size={12}/> : null} Simplify</button>
                                 <button onClick={() => getHelp('mnemonic')} disabled={loadingHelp} className="px-3 py-1 bg-white/20 hover:bg-white/30 rounded-full text-xs font-bold border border-white/10 flex items-center gap-1">{loadingHelp ? <RotateCw className="animate-spin" size={12}/> : null} Mnemonic</button>
@@ -1269,17 +1180,38 @@ const FlashcardStudy = ({ cards, onBack, apiKey, onUpdateDeck, deck }) => {
                         </div>
                     </div>
                 </div>
+                
+                {/* SRS Controls - Only show when flipped and in SRS Mode */}
                 {isSRS && flipped && (
                     <div className="mt-8 flex gap-3 animate-fade-in-up">
-                        <button onClick={() => handleRate(1)} className="flex flex-col items-center px-6 py-3 bg-red-100 hover:bg-red-200 text-red-700 rounded-xl transition border-b-4 border-red-200 hover:border-red-300 active:border-b-0 active:translate-y-1"><span className="font-bold">Again</span><span className="text-[10px] opacity-70">1m (1)</span></button>
-                        <button onClick={() => handleRate(10)} className="flex flex-col items-center px-6 py-3 bg-orange-100 hover:bg-orange-200 text-orange-700 rounded-xl transition border-b-4 border-orange-200 hover:border-orange-300 active:border-b-0 active:translate-y-1"><span className="font-bold">Hard</span><span className="text-[10px] opacity-70">10m (2)</span></button>
-                        <button onClick={() => handleRate(1440)} className="flex flex-col items-center px-6 py-3 bg-emerald-100 hover:bg-emerald-200 text-emerald-700 rounded-xl transition border-b-4 border-emerald-200 hover:border-emerald-300 active:border-b-0 active:translate-y-1"><span className="font-bold">Good</span><span className="text-[10px] opacity-70">1d (3)</span></button>
-                        <button onClick={() => handleRate(5760)} className="flex flex-col items-center px-6 py-3 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-xl transition border-b-4 border-blue-200 hover:border-blue-300 active:border-b-0 active:translate-y-1"><span className="font-bold">Easy</span><span className="text-[10px] opacity-70">4d (4)</span></button>
+                        <button onClick={() => handleRate(1)} className="flex flex-col items-center px-6 py-3 bg-red-100 hover:bg-red-200 text-red-700 rounded-xl transition border-b-4 border-red-200 hover:border-red-300 active:border-b-0 active:translate-y-1">
+                            <span className="font-bold">Again</span><span className="text-[10px] opacity-70">1m (1)</span>
+                        </button>
+                        <button onClick={() => handleRate(10)} className="flex flex-col items-center px-6 py-3 bg-orange-100 hover:bg-orange-200 text-orange-700 rounded-xl transition border-b-4 border-orange-200 hover:border-orange-300 active:border-b-0 active:translate-y-1">
+                            <span className="font-bold">Hard</span><span className="text-[10px] opacity-70">10m (2)</span>
+                        </button>
+                        <button onClick={() => handleRate(1440)} className="flex flex-col items-center px-6 py-3 bg-emerald-100 hover:bg-emerald-200 text-emerald-700 rounded-xl transition border-b-4 border-emerald-200 hover:border-emerald-300 active:border-b-0 active:translate-y-1">
+                            <span className="font-bold">Good</span><span className="text-[10px] opacity-70">1d (3)</span>
+                        </button>
+                        <button onClick={() => handleRate(5760)} className="flex flex-col items-center px-6 py-3 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-xl transition border-b-4 border-blue-200 hover:border-blue-300 active:border-b-0 active:translate-y-1">
+                            <span className="font-bold">Easy</span><span className="text-[10px] opacity-70">4d (4)</span>
+                        </button>
                     </div>
                 )}
-                {!isSRS && flipped && (<div className="mt-8"><button onClick={nextStandard} className="px-8 py-3 bg-slate-800 text-white rounded-full font-bold shadow-lg hover:bg-slate-700 transition">Next Card</button></div>)}
+                
+                {/* Standard Mode Navigation Hint */}
+                {!isSRS && flipped && (
+                     <div className="mt-8">
+                         <button onClick={nextStandard} className="px-8 py-3 bg-slate-800 text-white rounded-full font-bold shadow-lg hover:bg-slate-700 transition">Next Card</button>
+                     </div>
+                )}
+
                 {aiHelp && <div className="mt-6 bg-white p-4 rounded-lg shadow border border-indigo-100 max-w-xl w-full text-sm text-slate-700 animate-fade-in"><strong className="text-indigo-600 block mb-1">AI Helper:</strong> <FormattedText text={aiHelp}/></div>}
-                <div className="mt-8 text-slate-400 font-medium">{isSRS ? `Queue: ${dueQueue.length} remaining` : `Card ${idx + 1} / ${cards.length}`}</div>
+                
+                {/* Progress Indicator */}
+                <div className="mt-8 text-slate-400 font-medium">
+                    {isSRS ? `Queue: ${dueQueue.length} remaining` : `Card ${idx + 1} / ${cards.length}`}
+                </div>
             </div>
         </div>
     );
