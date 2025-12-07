@@ -5,7 +5,7 @@ import {
     RotateCw, CheckCircle, XCircle, Folder, ChevronDown,
     Mic, Presentation, BookOpenText, PieChart, AlertCircle,
     LayoutDashboard, Image as ImageIcon, X, FileType, LogOut, Lock, Mail, Edit3, Edit2,
-    Clock, Layers, Zap, Tag, Hash, Timer, Award, FileQuestion, PenTool, CheckSquare, Sliders
+    Clock, Layers, Zap, Tag, Hash, Timer, Award, FileQuestion, PenTool, CheckSquare, Sliders, Play
 } from 'lucide-react';
 
 // --- FIREBASE IMPORTS ---
@@ -20,8 +20,10 @@ import {
 } from "firebase/firestore";
 
 // --- CONFIGURATION ---
+// SECURITY NOTE: Replace these with your actual keys or environment variables.
+// Do not commit hardcoded keys to GitHub.
 const firebaseConfig = {
-  apiKey: "AIzaSyCqowVnkUXzjgutGHRKKptEm5NjCl7C4yQ",
+  apiKey: "YOUR_FIREBASE_API_KEY", 
   authDomain: "studygenie-691e5.firebaseapp.com",
   projectId: "studygenie-691e5",
   storageBucket: "studygenie-691e5.firebasestorage.app",
@@ -31,9 +33,15 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
+// Wrap in try-catch to prevent crash if config is missing during dev
+let app, auth, db;
+try {
+    app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+    db = getFirestore(app);
+} catch (e) {
+    console.error("Firebase initialization failed. Check your config.", e);
+}
 
 // --- UTILS ---
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -99,7 +107,7 @@ const validateAndFixData = (data, type) => {
                 type: 'saq', // Tag as SAQ for ExamRunner
                 q: String(item.q || "Error: Question missing"),
                 model: String(item.model || "No model answer provided."),
-                marks: typeof item.marks === 'number' ? item.marks : 5 // Default to 5 marks if missing (backward compatibility)
+                marks: typeof item.marks === 'number' ? item.marks : 5 
             };
         }
         return item;
@@ -175,8 +183,8 @@ const FormattedText = ({ text, className = "" }) => {
             .replace(/ewline/g, '<br/>') 
             .replace(/\\newline/g, '<br/>') 
             .replace(/\\\\n/g, '<br/>') 
-            .replace(/\\n/g, '<br/>')   
-            .replace(/\n/g, '<br/>')    
+            .replace(/\\n/g, '<br/>')    
+            .replace(/\n/g, '<br/>')      
             .replace(/\\textbf\{([^\}]+)\}/g, '<strong>$1</strong>')
             .replace(/\\text\{([^\}]+)\}/g, '$1')
             .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
@@ -322,7 +330,7 @@ const ExamSetupModal = ({ modules, onClose, onStartExam }) => {
     const mcqMarks = Math.round(totalMarks * (mcqPercentage / 100));
     const saqMarks = totalMarks - mcqMarks;
     const numMCQs = mcqMarks;
-    const numSAQs = Math.max(1, Math.round(saqMarks / 5)); // Changed: Divide by 5 for estimated 5-mark SAQs avg
+    const numSAQs = Math.max(1, Math.round(saqMarks / 5)); 
 
     const toggleModule = (id) => {
         setSelectedModuleIds(prev => prev.includes(id) ? prev.filter(m => m !== id) : [...prev, id]);
@@ -364,7 +372,7 @@ const ExamSetupModal = ({ modules, onClose, onStartExam }) => {
                     </div>
                     <div>
                         <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Include Modules</label>
-                        <div className="max-h-40 overflow-y-auto border rounded-lg">
+                        <div className="max-h-40 overflow-y-auto border rounded-lg custom-scroll">
                             {modules.map(m => (
                                 <div key={m.id} onClick={() => toggleModule(m.id)} className={`flex items-center justify-between p-3 border-b last:border-b-0 cursor-pointer hover:bg-slate-50 ${selectedModuleIds.includes(m.id) ? 'bg-indigo-50' : ''}`}>
                                     <span className="text-sm font-medium text-slate-700 truncate pr-2">{m.title}</span>
@@ -605,9 +613,6 @@ const SAQMode = ({ questions, onBack, apiKey }) => {
     );
 };
 
-// ... Sidebar, AuthPage, ManageModal, NameModal ...
-// (These are layout components, standard implementation as before)
-
 const Sidebar = ({ folders, decks, activeId, viewMode, onSelectDeck, onSelectFolder, onAddFolder, onDeleteFolder, onRenameFolder, onAddDeck, onDeleteDeck, onSettings }) => {
     const [expandedFolders, setExpandedFolders] = useState({});
     const toggleFolder = (folderId) => setExpandedFolders(prev => ({ ...prev, [folderId]: !prev[folderId] }));
@@ -724,6 +729,137 @@ const NameModal = ({ isOpen, type, initialValue, onClose, onSave }) => {
                     </div>
                 </form>
             </div>
+        </div>
+    );
+};
+
+// --- FOLDER DASHBOARD (Added to fix crash) ---
+const FolderDashboard = ({ folder, decks, onUpdateFolder, apiKey }) => {
+    const [showExamSetup, setShowExamSetup] = useState(false);
+    const [activeExam, setActiveExam] = useState(null);
+
+    // Calculate aggregated stats
+    const totalCards = decks.reduce((acc, d) => acc + (d.cards?.length || 0), 0);
+    const totalQuestions = decks.reduce((acc, d) => acc + (d.quiz?.length || 0), 0);
+    const totalExams = decks.reduce((acc, d) => acc + (d.exams?.length || 0), 0);
+
+    // Collect all questions for the course-wide exam
+    const getAllQuestions = (moduleIds) => {
+        let allQs = [];
+        decks.filter(d => moduleIds.includes(d.id)).forEach(d => {
+            if (d.exams) allQs = [...allQs, ...d.exams];
+            if (d.quiz) allQs = [...allQs, ...d.quiz];
+            if (d.saqs) allQs = [...allQs, ...d.saqs];
+        });
+        return allQs;
+    };
+
+    const handleStartExam = (config) => {
+        const pool = getAllQuestions(config.moduleIds);
+        
+        // Filter by type
+        const mcqPool = pool.filter(q => q.type !== 'saq');
+        const saqPool = pool.filter(q => q.type === 'saq');
+
+        // Random Selection
+        const shuffle = (arr) => arr.sort(() => 0.5 - Math.random());
+        const selectedMCQs = shuffle(mcqPool).slice(0, config.numMCQs);
+        const selectedSAQs = shuffle(saqPool).slice(0, config.numSAQs);
+
+        const finalQuestions = [...selectedMCQs, ...selectedSAQs];
+        
+        if (finalQuestions.length === 0) return alert("No questions found in selected modules.");
+
+        setActiveExam({ questions: finalQuestions, timeLimit: config.timeLimit });
+        setShowExamSetup(false);
+    };
+
+    if (activeExam) {
+        return <ExamRunner questions={activeExam.questions} timeLimit={activeExam.timeLimit} onBack={() => setActiveExam(null)} apiKey={apiKey} />;
+    }
+
+    return (
+        <div className="max-w-6xl mx-auto p-6">
+            {/* Header */}
+            <div className="mb-8 border-b border-slate-200 pb-4">
+                <input 
+                    value={folder.name} 
+                    onChange={(e) => onUpdateFolder({...folder, name: e.target.value})} 
+                    className="text-3xl font-bold bg-transparent border-transparent hover:border-slate-200 focus:border-indigo-500 focus:outline-none w-full text-slate-800"
+                />
+                <p className="text-slate-500 mt-1">{decks.length} Modules • {totalCards} Cards • {totalQuestions + totalExams} Questions</p>
+            </div>
+
+            {/* Stats Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                <div className="bg-indigo-50 p-6 rounded-xl border border-indigo-100">
+                    <div className="flex items-center gap-3 mb-2">
+                        <div className="p-2 bg-indigo-100 rounded-lg text-indigo-600"><BookOpen size={20}/></div>
+                        <h3 className="font-bold text-indigo-900">Total Cards</h3>
+                    </div>
+                    <p className="text-3xl font-bold text-indigo-600">{totalCards}</p>
+                </div>
+                <div className="bg-emerald-50 p-6 rounded-xl border border-emerald-100">
+                    <div className="flex items-center gap-3 mb-2">
+                        <div className="p-2 bg-emerald-100 rounded-lg text-emerald-600"><Brain size={20}/></div>
+                        <h3 className="font-bold text-emerald-900">Practice Qs</h3>
+                    </div>
+                    <p className="text-3xl font-bold text-emerald-600">{totalQuestions}</p>
+                </div>
+                <div className="bg-purple-50 p-6 rounded-xl border border-purple-100">
+                    <div className="flex items-center gap-3 mb-2">
+                        <div className="p-2 bg-purple-100 rounded-lg text-purple-600"><PenTool size={20}/></div>
+                        <h3 className="font-bold text-purple-900">Exam Qs</h3>
+                    </div>
+                    <p className="text-3xl font-bold text-purple-600">{totalExams}</p>
+                </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-4 mb-8">
+                <button 
+                    onClick={() => setShowExamSetup(true)} 
+                    className="flex-1 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white p-6 rounded-xl shadow-lg transition transform hover:-translate-y-1 flex flex-col items-center justify-center gap-2"
+                >
+                    <Award size={32} className="mb-2"/>
+                    <span className="font-bold text-lg">Start Course Exam</span>
+                    <span className="text-red-100 text-sm">Test knowledge across all modules</span>
+                </button>
+            </div>
+
+            {/* Module List */}
+            <h3 className="font-bold text-xl text-slate-800 mb-4">Modules</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {decks.map(deck => (
+                    <div key={deck.id} className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition group relative">
+                        <div className="flex justify-between items-start mb-4">
+                            <div className="p-3 bg-slate-100 rounded-lg text-slate-600 group-hover:bg-indigo-50 group-hover:text-indigo-600 transition">
+                                <Layers size={24}/>
+                            </div>
+                            <span className="text-xs font-bold bg-slate-100 text-slate-500 px-2 py-1 rounded">{deck.cards?.length || 0} cards</span>
+                        </div>
+                        <h4 className="font-bold text-lg text-slate-800 mb-1 line-clamp-1">{deck.title}</h4>
+                        <p className="text-sm text-slate-500 line-clamp-2 mb-4 h-10">{deck.notes ? deck.notes.substring(0, 100) : "No content notes yet."}</p>
+                        <div className="flex gap-2 text-sm text-slate-400">
+                           <span className="flex items-center gap-1"><Brain size={14}/> {deck.quiz?.length || 0}</span>
+                           <span className="flex items-center gap-1"><PenTool size={14}/> {deck.saqs?.length || 0}</span>
+                        </div>
+                    </div>
+                ))}
+                <div className="border-2 border-dashed border-slate-300 rounded-xl p-6 flex flex-col items-center justify-center text-slate-400 hover:border-indigo-400 hover:text-indigo-500 hover:bg-indigo-50 transition cursor-pointer min-h-[200px]">
+                    <Plus size={48} className="mb-2 opacity-50"/>
+                    <span className="font-bold">Create New Module</span>
+                    <span className="text-xs">Use sidebar to add</span>
+                </div>
+            </div>
+
+            {showExamSetup && (
+                <ExamSetupModal 
+                    modules={decks} 
+                    onClose={() => setShowExamSetup(false)} 
+                    onStartExam={handleStartExam} 
+                />
+            )}
         </div>
     );
 };
