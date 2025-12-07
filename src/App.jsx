@@ -82,15 +82,18 @@ const validateAndFixData = (data, type) => {
         // Fix MCQs
         if (type === 'mcq') {
             let options = item.options;
-            if (typeof options === 'string') {
-                options = options.split(',').map(s => s.trim());
+            // Handle case where options is missing or not an array
+            if (!options || !Array.isArray(options)) {
+                options = ["True", "False"]; // Fallback options
             }
-            if (!Array.isArray(options)) options = ["True", "False"]; 
+            
+            // Handle case where option strings are malformed
+            options = options.map(opt => String(opt || "Option missing"));
             
             return {
                 q: String(item.q || "Error: Question missing"),
-                options: options.map(String),
-                a: typeof item.a === 'number' ? item.a : 0, 
+                options: options,
+                a: (typeof item.a === 'number' && item.a < options.length) ? item.a : 0, 
                 exp: String(item.exp || "No explanation provided.")
             };
         }
@@ -101,19 +104,24 @@ const validateAndFixData = (data, type) => {
 // --- NUCLEAR JSON PARSER ---
 const cleanAndParseJSON = (text) => {
     let clean = text.replace(/```json/g, '').replace(/```/g, '').trim();
-    // Only double-escape backslashes that aren't already escaped JSON characters
     clean = clean.replace(/\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})/g, "\\\\");
 
     try {
         return JSON.parse(clean);
     } catch (e) {
-        // Basic recovery for truncated arrays
         if (clean.startsWith('[') && !clean.endsWith(']')) {
             const lastClose = clean.lastIndexOf('}');
             if (lastClose !== -1) {
                 const fixed = clean.substring(0, lastClose + 1) + ']';
                 try { return JSON.parse(fixed); } catch (e2) { console.error("Repair failed", e2); }
             }
+        }
+        if (clean.startsWith('{') && !clean.endsWith('}')) {
+             const lastQuote = clean.lastIndexOf('"');
+             if (lastQuote !== -1) {
+                 const fixed = clean.substring(0, lastQuote + 1) + '"}';
+                 try { return JSON.parse(fixed); } catch(e3) { console.error("Object repair failed", e3); }
+             }
         }
         console.error("JSON Parse Error:", e);
         throw new Error("Failed to parse AI response.");
@@ -175,20 +183,22 @@ const FormattedText = ({ text, className = "" }) => {
     );
 };
 
-// --- GEMINI AI SERVICE ---
+// --- GEMINI AI SERVICE (DIRECT CLIENT MODE) ---
 const generateContent = async (apiKey, prompt, context, systemInstruction, attachmentData = null, quantity = 1) => {
     if (!apiKey) throw new Error("API Key is missing. Please add your own Google Gemini Key in Settings.");
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
     
-    // Simpler prompt because we are using responseSchema (JSON Mode)
     const fullSystemPrompt = `
         You are StudyGenie, an advanced AI tutor.
         ${systemInstruction || ''}
-        OUTPUT RULES:
-        1. Double-escape all backslashes in LaTeX (e.g. \\\\alpha).
-        2. Use MARKDOWN for text formatting (e.g. **bold**).
-        3. Use LaTeX ($...$) ONLY for mathematical formulas.
+        CRITICAL OUTPUT RULES:
+        1. Return ONLY valid JSON.
+        2. Do NOT use markdown code blocks.
+        3. Double-escape all backslashes in LaTeX (e.g. \\\\alpha).
+        4. Use HTML <br/> for line breaks.
+        5. Use MARKDOWN for text formatting (e.g. **bold**).
+        6. Use LaTeX ($...$) ONLY for mathematical formulas.
     `;
 
     const contentsPart = [{ text: `CONTEXT:\n${context}\n\nTASK:\n${prompt}` }];
@@ -205,7 +215,7 @@ const generateContent = async (apiKey, prompt, context, systemInstruction, attac
                 body: JSON.stringify({
                     contents: [{ parts: contentsPart }],
                     system_instruction: { parts: [{ text: fullSystemPrompt }] },
-                    // FORCE JSON MODE: This is the fix for reliability
+                    // FORCE JSON MODE
                     generationConfig: {
                         responseMimeType: "application/json"
                     }
@@ -222,8 +232,6 @@ const generateContent = async (apiKey, prompt, context, systemInstruction, attac
             const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
             if (!text) throw new Error("No content generated.");
 
-            // Since we use responseMimeType="application/json", the text is ALREADY clean JSON.
-            // We just need minimal cleanup for LaTeX backslashes if the model missed double-escaping.
             return cleanAndParseJSON(text);
 
         } catch (error) {
@@ -235,6 +243,7 @@ const generateContent = async (apiKey, prompt, context, systemInstruction, attac
 };
 
 // ... Sidebar, AuthPage, FolderDashboard, ManageModal, NameModal are same ...
+// Including them for completeness in the file block
 
 // --- APP COMPONENTS ---
 
@@ -647,8 +656,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
             let attachmentPayload = null;
             if (attachment?.file) attachmentPayload = await fileToBase64(attachment.file);
 
-            // BATCH SIZING: Flashcards = 20, MCQs = 10 (High performance limits)
-            const BATCH_SIZE = (type === 'mcq') ? 10 : 20; 
+            const BATCH_SIZE = 5; 
             const totalBatches = Math.ceil(count / BATCH_SIZE);
             let accumulatedResults = [];
 
