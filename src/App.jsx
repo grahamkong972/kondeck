@@ -1067,12 +1067,12 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }
             if (finalExam.length === 0) throw new Error("Failed to generate exam questions.");
 
             setExamTimeLimit(timeLimit);
-            setActiveExamData(finalExam);
             setShowExamSetup(false);
+            setIsExamGenerating(false);
+            setActiveExamData(finalExam);
 
         } catch (e) {
             alert(e.message);
-        } finally {
             setIsExamGenerating(false);
         }
     };
