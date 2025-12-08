@@ -1035,12 +1035,38 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }
     const handleSaveSyllabus = () => onUpdateFolder({ ...folder, syllabus: syllabusText }); 
     const allModules = decks.filter(d => d.folderId === folder.id);
 
-    const handleAnalyze = async () => { /* ... existing analyze logic ... */ };
+    const handleAnalyze = async () => {
+        if (!syllabusText.trim()) return alert("Syllabus is empty.");
+        setIsAnalyzing(true);
+        try {
+            const moduleTitles = allModules.map(d => d.title).join(', ');
+            const prompt = `Analyze this syllabus against the existing modules: [${moduleTitles}]. Identify gaps or mismatches. Return JSON: { "analysis": "string", "suggestions": ["string", ...] }`;
+            const result = await generateContent(apiKey, prompt, syllabusText, "");
+            onUpdateFolder({ ...folder, analysis: result });
+        } catch (e) {
+            alert(e.message);
+        } finally {
+            setIsAnalyzing(false);
+        }
+    };
 
-    const handleGlobalUpdate = (updatedGlobalDeck) => { /* ... existing global update ... */ };
+    const handleGlobalUpdate = (updatedGlobalDeck) => {
+        const { cards, incorrectQuestions } = updatedGlobalDeck;
+        const updatedDecks = decks.map(deck => {
+            const relevantCards = cards.filter(c => c.originalDeckId === deck.id);
+            if (relevantCards.length > 0) {
+                const newCards = deck.cards.map(dc => relevantCards.find(rc => rc.id === dc.id) || dc);
+                return { ...deck, cards: newCards };
+            }
+            return deck;
+        });
+        setDecks(updatedDecks);
+        onUpdateFolder({ ...folder, incorrectQuestions });
+    };
 
     // --- LIVE EXAM GENERATOR (FOLDER LEVEL) ---
     const handleStartLiveExam = async ({ moduleIds, numMCQs, numSAQs, timeLimit }) => {
+        setShowExamSetup(false);
         setIsExamGenerating(true);
         try {
             // 1. Gather Context
