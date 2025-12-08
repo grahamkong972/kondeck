@@ -280,8 +280,8 @@ const AuthPage = () => {
                 <div className="text-center mb-8">
                     <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-indigo-100 text-indigo-600 mb-4">
                         <GraduationCap size={24} />
-                    </div>
-                    <h1 className="text-2xl font-bold text-slate-900">Welcome to Kongruence</h1>
+                    </div> 
+                    <h1 className="text-2xl font-bold text-slate-900">Welcome to Graham Kong</h1>
                     <p className="text-slate-500 mt-2">Your AI-powered study companion.</p>
                 </div>
                 <form onSubmit={handleAuth} className="space-y-4">
@@ -637,7 +637,7 @@ const Sidebar = ({ folders, decks, activeId, viewMode, onSelectDeck, onSelectFol
         <div className="w-full md:w-72 bg-slate-900 text-white flex flex-col h-screen fixed md:relative z-20 shadow-xl border-r border-slate-800">
             <div className="p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
                 <h1 className="font-bold text-xl flex items-center gap-2"><GraduationCap className="text-indigo-400" /> Kongruence</h1>
-                <button onClick={onSettings} className="hover:text-indigo-400 transition"><Settings size={18}/></button>
+                <button onClick={onSettings} className="hover:text-indigo-400 transition"><Settings size={18}/></button> 
             </div>
             <div className="flex-1 overflow-y-auto custom-scroll p-4 space-y-6">
                 {folders.map(folder => (
@@ -754,7 +754,6 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
     
     // Management Modal State
     const [manageMode, setManageMode] = useState(null); 
-    const [showExamSetup, setShowExamSetup] = useState(false); // Add state for module-level exam
     const [activeExamData, setActiveExamData] = useState(null);
     const [examTimeLimit, setExamTimeLimit] = useState(0);
 
@@ -882,46 +881,6 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
         } finally { setIsGenerating(false); setStatusMessage(""); }
     };
     
-    // Live Exam Generation for Module
-    const handleStartLiveExam = async ({ moduleIds, numMCQs, numSAQs, timeLimit }) => {
-        // Reuse generation logic but for a live session
-        // Since we are inside a module, we only use this module's context
-        setIsGenerating(true);
-        setStatusMessage("Generating Exam Paper...");
-        
-        try {
-             const currentInputs = { ...inputs };
-             const combinedContext = `MODULE: ${deck.title}\nNOTES: ${currentInputs.notes}\nTRANSCRIPT: ${currentInputs.transcript}\nSLIDES TEXT: ${currentInputs.slides}`;
-             
-             // Generate MCQs
-             let mcqs = [];
-             if(numMCQs > 0) {
-                 const promptMCQ = `Generate ${numMCQs} HARD, scenario-based multiple choice questions for a FINAL EXAM. JSON: [{"q":..., "options":..., "a":..., "exp":...}]`;
-                 const rawMCQ = await generateContent(apiKey, promptMCQ, combinedContext, "", null, numMCQs);
-                 mcqs = validateAndFixData(Array.isArray(rawMCQ) ? rawMCQ : [rawMCQ], 'mcq');
-             }
-
-             // Generate SAQs
-             let saqs = [];
-             if(numSAQs > 0) {
-                 const promptSAQ = `Generate ${numSAQs} Short Answer Questions (SAQ). Assign marks (2-7). JSON: [{"q":..., "model":..., "marks":5}]`;
-                 const rawSAQ = await generateContent(apiKey, promptSAQ, combinedContext, "", null, numSAQs);
-                 saqs = validateAndFixData(Array.isArray(rawSAQ) ? rawSAQ : [rawSAQ], 'saq');
-             }
-             
-             const finalExam = [...mcqs, ...saqs];
-             setExamTimeLimit(timeLimit);
-             setActiveExamData(finalExam);
-             setShowExamSetup(false);
-
-        } catch(e) {
-            alert(e.message);
-        } finally {
-            setIsGenerating(false);
-            setStatusMessage("");
-        }
-    };
-    
     if (activeExamData) {
          return <ExamRunner questions={activeExamData} timeLimit={examTimeLimit} onBack={() => setActiveExamData(null)} apiKey={apiKey} />;
     }
@@ -1036,9 +995,6 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
                             <button onClick={() => onUpdateDeck({...deck, mode: 'saq'})} disabled={!deck.saqs?.length} className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition disabled:opacity-50 disabled:cursor-not-allowed">
                                 <PenTool size={18}/> Practice SAQs
                             </button>
-                            <button onClick={() => setShowExamSetup(true)} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                                <FileQuestion size={18}/> Simulate Exam
-                            </button>
                         </div>
                     </div>
                 </div>
@@ -1052,13 +1008,6 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
                     onClose={() => setManageMode(null)}
                     onDeleteItem={handleDeleteItem}
                     onDeleteAll={handleDeleteAll}
-                />
-            )}
-             {showExamSetup && (
-                <ExamSetupModal 
-                    modules={[deck]} // Just this module
-                    onClose={() => setShowExamSetup(false)} 
-                    onStartExam={handleStartLiveExam} 
                 />
             )}
         </div>
