@@ -945,12 +945,15 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile, onUpdateProfile }) =
                     accumulatedResults = [...accumulatedResults, ...validatedResult];
                 } catch (batchError) { console.error(batchError); break; }
             }
-            setStatusMessage("Saving...");
-            const updatedDeck = { ...deck, ...currentInputs }; 
-            updatedDeck[targetKey] = [...(deck[targetKey] || []), ...accumulatedResults];
-            onUpdateDeck(updatedDeck);
-            const newCredits = userProfile.subscription.credits - cost;
-            onUpdateProfile({ ...userProfile, subscription: { ...userProfile.subscription, credits: newCredits } });
+            // Step 2: After the loop finishes without error:
+            setStatusMessage("Saving...");
+            const updatedDeck = { ...deck, ...currentInputs }; 
+            updatedDeck[targetKey] = [...(deck[targetKey] || []), ...accumulatedResults];
+            onUpdateDeck(updatedDeck);
+            
+            // DEDUCT CREDITS HERE ONLY IF SUCCESSFUL
+            const newCredits = userProfile.subscription.credits - cost;
+            onUpdateProfile({ ...userProfile, subscription: { ...userProfile.subscription, credits: newCredits } });
 
         } catch (error) { 
             alert(error.message); 
