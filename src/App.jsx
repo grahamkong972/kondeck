@@ -325,7 +325,8 @@ const ExamSetupModal = ({ modules, onClose, onStartExam }) => {
     const mcqMarks = Math.round(totalMarks * (mcqPercentage / 100));
     const saqMarks = totalMarks - mcqMarks;
     const numMCQs = mcqPercentage === 0 ? 0 : Math.max(1, mcqMarks); // Ensure at least 1 MCQ if percentage > 0
-    const numSAQs = Math.max(1, Math.round(saqMarks / 5)); // Estimated 5 marks per SAQ
+    // FIX: Ensure 0 SAQs if percentage is 0
+    const numSAQs = saqPercentage === 0 ? 0 : Math.max(1, Math.round(saqMarks / 5)); 
 
     const toggleModule = (id) => {
         setSelectedModuleIds(prev => prev.includes(id) ? prev.filter(m => m !== id) : [...prev, id]);
@@ -1155,6 +1156,7 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }
     const [activeExamData, setActiveExamData] = useState(null); 
     const [examTimeLimit, setExamTimeLimit] = useState(0); 
     const [isExamGenerating, setIsExamGenerating] = useState(false); // Loading state
+    const [generationProgress, setGenerationProgress] = useState(0); // NEW: Progress state
 
     useEffect(() => { setSyllabusText(folder.syllabus || ""); }, [folder.id]);
     const handleSaveSyllabus = () => onUpdateFolder({ ...folder, syllabus: syllabusText }); 
@@ -1193,37 +1195,52 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }
     const handleStartLiveExam = async ({ moduleIds, numMCQs, numSAQs, timeLimit }) => {
         setShowExamSetup(false);
         setIsExamGenerating(true);
+        setGenerationProgress(0); // Reset progress
+
         try {
             // 1. Gather Context
+            setGenerationProgress(10);
             const selectedDecks = allModules.filter(d => moduleIds.includes(d.id));
             const combinedContext = selectedDecks.map(d => `MODULE: ${d.title}\n${d.notes}\n${d.transcript}\n${d.slides}`).join("\n\n---\n\n");
             
             // 2. Generate MCQs
+            setGenerationProgress(20);
             let mcqs = [];
             if(numMCQs > 0) {
                  const promptMCQ = `Generate ${numMCQs} HARD, scenario-based multiple choice questions for a FINAL EXAM covering these modules. Focus on synthesis and application. JSON: [{"q":..., "options":..., "a":..., "exp":...}]`;
+                 setGenerationProgress(30); // Started generating MCQs
                  const rawMCQ = await generateContent(apiKey, promptMCQ, combinedContext, "", null, numMCQs);
                  mcqs = validateAndFixData(Array.isArray(rawMCQ) ? rawMCQ : [rawMCQ], 'mcq');
+                 setGenerationProgress(60); // Finished generating MCQs
+            } else {
+                 setGenerationProgress(60); // Skip MCQ phase
             }
 
             // 3. Generate SAQs
             let saqs = [];
             if(numSAQs > 0) {
                  const promptSAQ = `Generate ${numSAQs} Short Answer Questions (SAQ) testing deep understanding of these modules. Assign marks (2-7). JSON: [{"q":..., "model":..., "marks":5}]`;
+                 setGenerationProgress(70); // Started generating SAQs
                  const rawSAQ = await generateContent(apiKey, promptSAQ, combinedContext, "", null, numSAQs);
                  saqs = validateAndFixData(Array.isArray(rawSAQ) ? rawSAQ : [rawSAQ], 'saq');
+                 setGenerationProgress(90); // Finished generating SAQs
+            } else {
+                 setGenerationProgress(90); // Skip SAQ phase
             }
             
             const finalExam = [...mcqs, ...saqs];
             if (finalExam.length === 0) throw new Error("Failed to generate exam questions.");
 
             setExamTimeLimit(timeLimit);
+            setGenerationProgress(100);
+            await sleep(500); // Small delay to see 100%
             setActiveExamData(finalExam);
 
         } catch (e) {
             alert(e.message);
         } finally {
             setIsExamGenerating(false);
+            setGenerationProgress(0);
         }
     };
 
@@ -1247,9 +1264,22 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }
     if (isExamGenerating) {
         return (
             <div className="h-full flex flex-col items-center justify-center">
-                <RotateCw className="animate-spin text-indigo-600 mb-4" size={48} />
-                <h3 className="text-xl font-bold text-slate-800">Generating Live Exam...</h3>
-                <p className="text-slate-500"> analyzing {decks.length} modules to build your paper.</p>
+                <div className="w-64 h-2 bg-slate-200 rounded-full mb-4 overflow-hidden relative">
+                    <div 
+                        className="h-full bg-indigo-600 transition-all duration-500 ease-out" 
+                        style={{ width: `${generationProgress}%` }}
+                    ></div>
+                </div>
+                <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                    {generationProgress < 100 ? <RotateCw className="animate-spin text-indigo-600" size={24} /> : <CheckCircle className="text-emerald-500" size={24}/>}
+                    {generationProgress < 100 ? "Building Exam..." : "Ready!"}
+                </h3>
+                <p className="text-slate-500 text-sm mt-2">
+                    {generationProgress < 20 && "Analyzing modules..."}
+                    {generationProgress >= 20 && generationProgress < 60 && "Drafting multiple choice..."}
+                    {generationProgress >= 60 && generationProgress < 90 && "Composing short answer questions..."}
+                    {generationProgress >= 90 && "Finalizing paper..."}
+                </p>
             </div>
         )
     }
