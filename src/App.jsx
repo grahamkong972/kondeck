@@ -331,7 +331,7 @@ const ExamSetupModal = ({ modules, onClose, onStartExam }) => {
     const mcqMarks = Math.round(totalMarks * (mcqPercentage / 100));
     const saqMarks = totalMarks - mcqMarks;
     const numMCQs = mcqMarks;
-    const numSAQs = Math.max(1, Math.round(saqMarks / 5)); 
+    const numSAQs = saqMarks > 0 ? Math.max(1, Math.round(saqMarks / 5)) : 0; 
 
     const toggleModule = (id) => {
         setSelectedModuleIds(prev => prev.includes(id) ? prev.filter(m => m !== id) : [...prev, id]);
