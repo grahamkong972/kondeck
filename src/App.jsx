@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { 
     BookOpen, Brain, ChevronLeft, ChevronRight, Settings, 
     Plus, Trash2, GraduationCap, FileText, Sparkles, 
@@ -178,8 +178,8 @@ const FormattedText = ({ text, className = "" }) => {
             .replace(/ewline/g, '<br/>') 
             .replace(/\\newline/g, '<br/>') 
             .replace(/\\\\n/g, '<br/>') 
-            .replace(/\\n/g, '<br/>')   
-            .replace(/\n/g, '<br/>')    
+            .replace(/\\n/g, '<br/>')    
+            .replace(/\n/g, '<br/>')     
             .replace(/\\textbf\{([^\}]+)\}/g, '<strong>$1</strong>')
             .replace(/\\text\{([^\}]+)\}/g, '$1')
             .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
@@ -386,7 +386,7 @@ const ExamSetupModal = ({ modules, onClose, onStartExam }) => {
     );
 };
 
-// --- EXAM RUNNER (Unified Quiz + SAQ) ---
+// --- EXAM RUNNER (Fixed: Removed infinite loop) ---
 const ExamRunner = ({ questions, timeLimit, onBack, apiKey }) => {
     const [answers, setAnswers] = useState({});
     const [saqFeedback, setSaqFeedback] = useState({});
@@ -400,28 +400,33 @@ const ExamRunner = ({ questions, timeLimit, onBack, apiKey }) => {
             const timer = setInterval(() => setTimeLeft(p => p - 1), 1000);
             return () => clearInterval(timer);
         } else if (timeLeft === 0 && !submitted) {
-            setSubmitted(true);
+            handleSubmit();
         }
     }, [submitted, timeLeft]);
 
     const formatTime = (s) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
     
-    const mcqQuestions = questions.filter(q => q.type !== 'saq');
+    // Memoize the filtering so it doesn't re-run every render
+    const mcqQuestions = useMemo(() => questions.filter(q => q.type !== 'saq'), [questions]);
     const mcqCount = mcqQuestions.length;
     
-    const calculateMcqScore = useCallback(() => {
+    // Derived state for stats - Calculated during render, but does NOT set state
+    const currentStats = useMemo(() => {
         let score = 0;
         const incorrect = [];
-        mcqQuestions.forEach((q, qIndex) => {
+        mcqQuestions.forEach((q) => {
             const idx = questions.indexOf(q);
             if (answers[idx] === q.a) score++;
             else incorrect.push({ ...q, userAnswer: answers[idx] });
         });
-        setIncorrectQuestions(incorrect);
-        return score;
+        return { score, incorrect };
     }, [answers, questions, mcqQuestions]);
 
-    const mcqScore = calculateMcqScore();
+    const handleSubmit = () => {
+        setSubmitted(true);
+        // Only set state on submit, preventing the render loop
+        setIncorrectQuestions(currentStats.incorrect);
+    };
 
     const gradeSAQ = async (index) => {
         if (!apiKey) return alert("API Key required for grading.");
@@ -454,7 +459,7 @@ const ExamRunner = ({ questions, timeLimit, onBack, apiKey }) => {
                 <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 mb-8 flex justify-between items-center">
                     <div>
                         <h2 className="text-lg font-bold text-slate-800">Exam Results</h2>
-                        <p className="text-slate-500">You scored {mcqScore} / {mcqCount} on multiple choice.</p>
+                        <p className="text-slate-500">You scored {currentStats.score} / {mcqCount} on multiple choice.</p>
                     </div>
                     <div className="text-right">
                         <div className="text-xs font-bold text-slate-400 uppercase">SAQ Review</div>
@@ -535,7 +540,7 @@ const ExamRunner = ({ questions, timeLimit, onBack, apiKey }) => {
                     );
                 })}
             </div>
-            {!submitted && <div className="sticky bottom-6 flex justify-center"><button onClick={() => { setSubmitted(true); calculateMcqScore(); }} className="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-8 rounded-full shadow-xl transition hover:-translate-y-1">Submit Exam</button></div>}
+            {!submitted && <div className="sticky bottom-6 flex justify-center"><button onClick={handleSubmit} className="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-8 rounded-full shadow-xl transition hover:-translate-y-1">Submit Exam</button></div>}
         </div>
     );
 };
@@ -618,8 +623,129 @@ const SAQMode = ({ questions, onBack, apiKey }) => {
     );
 };
 
-// ... Sidebar, AuthPage, ManageModal, NameModal ...
-// (These are layout components, standard implementation as before)
+// --- FLASHCARD STUDY COMPONENT ---
+const FlashcardStudy = ({ deck, onUpdateDeck, onBack, apiKey }) => {
+    const [currentIndex, setCurrentIndex] = useState(0);
+    const [isFlipped, setIsFlipped] = useState(false);
+    const [showSrsButtons, setShowSrsButtons] = useState(false);
+    const [sessionStats, setSessionStats] = useState({ reviewed: 0, learned: 0 });
+
+    const cards = deck.cards || [];
+    const isSRS = deck.studyMode === 'srs';
+    
+    // Sort cards for SRS: Due/New first, then future reviews
+    const activeCards = useMemo(() => {
+        if (!isSRS) return cards;
+        const now = Date.now();
+        return [...cards].sort((a, b) => {
+            const aDue = a.nextReview || 0;
+            const bDue = b.nextReview || 0;
+            // Prioritize: Overdue/Now (<= now) -> New (0/null) -> Future (> now)
+            const aIsDue = aDue <= now && aDue !== 0;
+            const bIsDue = bDue <= now && bDue !== 0;
+            if (aIsDue && !bIsDue) return -1;
+            if (!aIsDue && bIsDue) return 1;
+            if (!a.nextReview && b.nextReview) return -1; // New before future
+            if (a.nextReview && !b.nextReview) return 1;
+            return aDue - bDue;
+        });
+    }, [cards, isSRS]);
+
+    const currentCard = activeCards[currentIndex];
+
+    const handleFlip = () => {
+        setIsFlipped(!isFlipped);
+        if (isSRS && !isFlipped) setShowSrsButtons(true);
+    };
+
+    const handleNext = () => {
+        setIsFlipped(false);
+        setShowSrsButtons(false);
+        setCurrentIndex((prev) => (prev + 1) % activeCards.length);
+    };
+
+    const handleSRS = (quality) => {
+        // Simple SRS Algorithm (Leitner-ish)
+        // quality: 0 (Again), 1 (Hard), 2 (Good), 3 (Easy)
+        const now = Date.now();
+        const day = 24 * 60 * 60 * 1000;
+        let interval = day;
+
+        if (quality === 0) interval = 10 * 60 * 1000; // 10 mins
+        else if (quality === 1) interval = day; // 1 day
+        else if (quality === 2) interval = 3 * day; // 3 days
+        else if (quality === 3) interval = 7 * day; // 7 days
+
+        const updatedCard = { ...currentCard, nextReview: now + interval };
+        const updatedCards = cards.map(c => c.id === currentCard.id || c.q === currentCard.q ? updatedCard : c);
+        
+        onUpdateDeck({ ...deck, cards: updatedCards });
+        setSessionStats(prev => ({ ...prev, reviewed: prev.reviewed + 1 }));
+        handleNext();
+    };
+
+    if (!currentCard) return <div className="p-10 text-center text-slate-500">No cards available. Generate some first!</div>;
+
+    return (
+        <div className="h-full flex flex-col max-w-4xl mx-auto p-6">
+             <div className="flex justify-between items-center mb-6">
+                <button onClick={onBack} className="flex gap-2 text-slate-500 hover:text-indigo-600 font-medium"><ChevronLeft/> Back to Dashboard</button>
+                <div className="flex items-center gap-4">
+                    <div className="text-sm font-medium text-slate-500">Session: {sessionStats.reviewed} reviewed</div>
+                    <div className="text-sm font-bold text-slate-700">{currentIndex + 1} / {activeCards.length}</div>
+                </div>
+            </div>
+
+            <div className="flex-1 flex flex-col justify-center items-center perspective-1000">
+                <div 
+                    onClick={handleFlip}
+                    className={`relative w-full max-w-2xl aspect-[3/2] bg-white rounded-2xl shadow-xl border border-slate-200 cursor-pointer transition-all duration-500 transform-style-3d ${isFlipped ? 'rotate-y-180' : ''}`}
+                >
+                    {/* Front */}
+                    <div className="absolute inset-0 backface-hidden flex flex-col items-center justify-center p-8 text-center">
+                        <span className="absolute top-6 left-6 text-xs font-bold text-slate-400 uppercase tracking-wider">Question</span>
+                        <div className="prose prose-lg text-slate-800">
+                            <FormattedText text={currentCard.q} />
+                        </div>
+                        <span className="absolute bottom-6 text-sm text-slate-400">Click to flip</span>
+                    </div>
+
+                    {/* Back */}
+                    <div className="absolute inset-0 backface-hidden rotate-y-180 flex flex-col items-center justify-center p-8 text-center bg-indigo-50/30">
+                         <span className="absolute top-6 left-6 text-xs font-bold text-indigo-400 uppercase tracking-wider">Answer</span>
+                         <div className="prose prose-lg text-slate-800">
+                            <FormattedText text={currentCard.a} />
+                        </div>
+                    </div>
+                </div>
+
+                <div className="mt-8 h-20 w-full max-w-2xl flex items-center justify-center">
+                    {isSRS && showSrsButtons ? (
+                         <div className="grid grid-cols-4 gap-3 w-full animate-fade-in-up">
+                            <button onClick={(e) => { e.stopPropagation(); handleSRS(0); }} className="p-3 rounded-lg bg-red-100 text-red-700 font-bold hover:bg-red-200 transition">Again<div className="text-[10px] font-normal opacity-70">10m</div></button>
+                            <button onClick={(e) => { e.stopPropagation(); handleSRS(1); }} className="p-3 rounded-lg bg-orange-100 text-orange-700 font-bold hover:bg-orange-200 transition">Hard<div className="text-[10px] font-normal opacity-70">1d</div></button>
+                            <button onClick={(e) => { e.stopPropagation(); handleSRS(2); }} className="p-3 rounded-lg bg-blue-100 text-blue-700 font-bold hover:bg-blue-200 transition">Good<div className="text-[10px] font-normal opacity-70">3d</div></button>
+                            <button onClick={(e) => { e.stopPropagation(); handleSRS(3); }} className="p-3 rounded-lg bg-emerald-100 text-emerald-700 font-bold hover:bg-emerald-200 transition">Easy<div className="text-[10px] font-normal opacity-70">7d</div></button>
+                         </div>
+                    ) : (
+                        <div className="flex gap-4">
+                             <button onClick={handleFlip} className="px-6 py-2 rounded-full bg-white border border-slate-300 shadow-sm text-slate-600 font-medium hover:bg-slate-50 transition">
+                                {isFlipped ? "Flip Back" : "Show Answer"}
+                            </button>
+                            {!isSRS && isFlipped && (
+                                <button onClick={handleNext} className="px-6 py-2 rounded-full bg-indigo-600 text-white shadow-md font-bold hover:bg-indigo-700 transition flex items-center gap-2">
+                                    Next Card <ChevronRight size={16}/>
+                                </button>
+                            )}
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// ... Sidebar, ManageModal, NameModal ...
 
 const Sidebar = ({ folders, decks, activeId, viewMode, onSelectDeck, onSelectFolder, onAddFolder, onDeleteFolder, onRenameFolder, onAddDeck, onDeleteDeck, onSettings }) => {
     const [expandedFolders, setExpandedFolders] = useState({});
@@ -741,7 +867,6 @@ const NameModal = ({ isOpen, type, initialValue, onClose, onSave }) => {
         </div>
     );
 };
-
 
 const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
     const [isGenerating, setIsGenerating] = useState(false);
@@ -1111,7 +1236,7 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }
             incorrectQuestions: folder.incorrectQuestions || [],
             studyMode: globalStudyMode,
         };
-        const virtualDeck = { id: 'global', title: `${folder.name} (Global)`, studyMode: globalStudyMode, cards: finalCards };
+        const virtualDeck = { id: 'global', title: `${folder.name} (Global)`, studyMode: globalStudyMode, cards: allCards }; // Fixed variable name issue
         return <FlashcardStudy deck={globalDeck} onUpdateDeck={handleGlobalUpdate} onBack={() => setIsGlobalStudy(false)} apiKey={apiKey} />;
     }
 
@@ -1178,7 +1303,7 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }
                             <div className="flex items-center gap-2 mb-4 cursor-pointer" onClick={() => setGlobalShuffle(!globalShuffle)}>
                                 <div className={`w-5 h-5 rounded flex items-center justify-center border transition ${globalShuffle ? 'bg-white border-white text-indigo-600' : 'border-indigo-200 text-transparent'}`}>
                                     <Check size={14} strokeWidth={4} />
-                                </div>                            <button onClick={() => onUpdateFolder({ ...folder, incorrectQuestions: [] })} className="text-xs text-red-200 hover:text-red-50 font-medium hover:underline">Clear Incorrect</button>
+                                </div>                                    <button onClick={() => onUpdateFolder({ ...folder, incorrectQuestions: [] })} className="text-xs text-red-200 hover:text-red-50 font-medium hover:underline">Clear Incorrect</button>
                                 <span className="text-sm font-medium text-indigo-50">Shuffle Cards</span>
                             </div>
                             <button onClick={() => setIsGlobalStudy(true)} disabled={totalCards === 0} className="w-full bg-white text-indigo-600 font-bold py-3 rounded-lg hover:bg-indigo-50 transition disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"><Zap size={18}/> Start Studying</button>
