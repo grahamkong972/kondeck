@@ -734,7 +734,7 @@ const Sidebar = ({ folders, decks, activeId, viewMode, onSelectDeck, onSelectFol
     return (
         <div className="w-full md:w-72 bg-slate-900 text-white flex flex-col h-screen fixed md:relative z-20 shadow-xl border-r border-slate-800">
             <div className="p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
-                <h1 className="font-bold text-xl flex items-center gap-2"><GraduationCap className="text-indigo-400" /> Kongruence</h1>
+                <h1 className="font-bold text-xl flex items-center gap-2"><GraduationCap className="text-indigo-400" /> Graham Kong</h1>
                 <button onClick={onSettings} className="hover:text-indigo-400 transition"><Settings size={18}/></button>
             </div>
             <div className="flex-1 overflow-y-auto custom-scroll p-4 space-y-6">
