@@ -1093,17 +1093,27 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }
             if (finalExam.length === 0) throw new Error("Failed to generate exam questions.");
 
             setExamTimeLimit(timeLimit);
-            setShowExamSetup(false);
-            setIsExamGenerating(false);
             setActiveExamData(finalExam);
 
         } catch (e) {
             alert(e.message);
+        } finally {
             setIsExamGenerating(false);
         }
     };
 
-    if (isGlobalStudy) { /* ... same ... */ }
+    if (isGlobalStudy) {
+        const allCards = allModules.flatMap(d => (d.cards || []).map(c => ({ ...c, originalDeckId: d.id, id: c.id || Math.random() })));
+        const globalDeck = {
+            id: 'global',
+            title: `Global Study: ${folder.name}`,
+            cards: globalShuffle ? [...allCards].sort(() => Math.random() - 0.5) : allCards,
+            incorrectQuestions: folder.incorrectQuestions || [],
+            studyMode: globalStudyMode,
+        };
+        const virtualDeck = { id: 'global', title: `${folder.name} (Global)`, studyMode: globalStudyMode, cards: finalCards };
+        return <FlashcardStudy deck={globalDeck} onUpdateDeck={handleGlobalUpdate} onBack={() => setIsGlobalStudy(false)} apiKey={apiKey} />;
+    }
 
     if (activeExamData) {
          return <ExamRunner questions={activeExamData} timeLimit={examTimeLimit} onBack={() => setActiveExamData(null)} apiKey={apiKey} />;
