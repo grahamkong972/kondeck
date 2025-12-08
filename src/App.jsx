@@ -324,7 +324,7 @@ const ExamSetupModal = ({ modules, onClose, onStartExam }) => {
     const saqPercentage = 100 - mcqPercentage;
     const mcqMarks = Math.round(totalMarks * (mcqPercentage / 100));
     const saqMarks = totalMarks - mcqMarks;
-    const numMCQs = mcqMarks;
+    const numMCQs = mcqPercentage === 0 ? 0 : Math.max(1, mcqMarks); // Ensure at least 1 MCQ if percentage > 0
     const numSAQs = Math.max(1, Math.round(saqMarks / 5)); // Estimated 5 marks per SAQ
 
     const toggleModule = (id) => {
@@ -335,7 +335,7 @@ const ExamSetupModal = ({ modules, onClose, onStartExam }) => {
         if (selectedModuleIds.length === 0) return alert("Select at least one module.");
         onStartExam({
             moduleIds: selectedModuleIds,
-            numMCQs,
+            numMCQs: mcqPercentage === 0 ? 0 : Math.max(1, numMCQs), // Ensure 0 MCQs if percentage is 0
             numSAQs,
             timeLimit
         });
@@ -393,6 +393,7 @@ const ExamRunner = ({ questions, timeLimit, onBack, apiKey }) => {
     const [submitted, setSubmitted] = useState(false);
     const [timeLeft, setTimeLeft] = useState(timeLimit ? timeLimit * 60 : 600); 
     const [gradingLoading, setGradingLoading] = useState({});
+    const [incorrectQuestions, setIncorrectQuestions] = useState([]); // State to store incorrect questions
 
     useEffect(() => {
         if (!submitted && timeLeft > 0) {
@@ -404,14 +405,32 @@ const ExamRunner = ({ questions, timeLimit, onBack, apiKey }) => {
     }, [submitted, timeLeft]);
 
     const formatTime = (s) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
-
+    
     const mcqQuestions = questions.filter(q => q.type !== 'saq');
     const mcqCount = mcqQuestions.length;
-    const mcqScore = mcqQuestions.reduce((acc, q) => {
+    
+    const calculateMcqScore = useCallback(() => {
+        let score = 0;
+        const incorrect = [];
+        mcqQuestions.forEach((q, qIndex) => {
+            const idx = questions.indexOf(q);
+            if (answers[idx] === q.a) score++;
+            else incorrect.push({ ...q, userAnswer: answers[idx] });
+        });
+        setIncorrectQuestions(incorrect);
+        return score;
+    }, [answers, questions, mcqQuestions]);
+
+    const mcqScore = calculateMcqScore();
+
+    useEffect(() => {
         const idx = questions.indexOf(q);
-        if (answers[idx] === q.a) return acc + 1;
-        return acc;
-    }, 0);
+        if (answers[idx] === q.a) score++;
+        else incorrect.push({ ...q, userAnswer: answers[idx] });
+    });
+    setIncorrectQuestions(incorrect);
+    return score;
+    }, [answers, questions, mcqQuestions]);
 
     const gradeSAQ = async (index) => {
         if (!apiKey) return alert("API Key required for grading.");
@@ -443,7 +462,7 @@ const ExamRunner = ({ questions, timeLimit, onBack, apiKey }) => {
             {submitted && (
                 <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 mb-8 flex justify-between items-center">
                     <div>
-                        <h2 className="text-lg font-bold text-slate-800">MCQ Results</h2>
+                        <h2 className="text-lg font-bold text-slate-800">Exam Results</h2>
                         <p className="text-slate-500">You scored {mcqScore} / {mcqCount} on multiple choice.</p>
                     </div>
                     <div className="text-right">
@@ -525,7 +544,7 @@ const ExamRunner = ({ questions, timeLimit, onBack, apiKey }) => {
                     );
                 })}
             </div>
-            {!submitted && <div className="sticky bottom-6 flex justify-center"><button onClick={() => setSubmitted(true)} className="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-8 rounded-full shadow-xl transition hover:-translate-y-1">Submit Exam</button></div>}
+            {!submitted && <div className="sticky bottom-6 flex justify-center"><button onClick={() => { setSubmitted(true); calculateMcqScore(); }} className="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-8 rounded-full shadow-xl transition hover:-translate-y-1">Submit Exam</button></div>}
         </div>
     );
 };
@@ -1064,7 +1083,7 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }
     const [syllabusText, setSyllabusText] = useState(folder.syllabus || "");
     const [isGlobalStudy, setIsGlobalStudy] = useState(false);
     const [globalStudyMode, setGlobalStudyMode] = useState('srs');
-    const [globalShuffle, setGlobalShuffle] = useState(false);
+    const [globalShuffle, setGlobalShuffle] = useState(true); // Default to shuffled
     
     // NEW: Live Exam States
     const [showExamSetup, setShowExamSetup] = useState(false);
@@ -1074,6 +1093,7 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }
 
     useEffect(() => { setSyllabusText(folder.syllabus || ""); }, [folder.id]);
     const handleSaveSyllabus = () => onUpdateFolder({ ...folder, syllabus: syllabusText }); 
+    const allModules = decks.filter(d => d.folderId === folder.id);
 
     const handleAnalyze = async () => { /* ... existing analyze logic ... */ };
 
@@ -1084,7 +1104,7 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }
         setIsExamGenerating(true);
         try {
             // 1. Gather Context
-            const selectedDecks = decks.filter(d => moduleIds.includes(d.id));
+            const selectedDecks = allModules.filter(d => moduleIds.includes(d.id));
             const combinedContext = selectedDecks.map(d => `MODULE: ${d.title}\n${d.notes}\n${d.transcript}\n${d.slides}`).join("\n\n---\n\n");
             
             // 2. Generate MCQs
@@ -1133,9 +1153,9 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }
         )
     }
 
-    const totalCards = decks.reduce((sum, d) => sum + (d.cards?.length || 0), 0);
-    const totalQuestions = decks.reduce((sum, d) => sum + (d.quiz?.length || 0), 0);
-    const totalSaqs = decks.reduce((sum, d) => sum + (d.saqs?.length || 0), 0); 
+    const totalCards = allModules.reduce((sum, d) => sum + (d.cards?.length || 0), 0);
+    const totalQuestions = allModules.reduce((sum, d) => sum + (d.quiz?.length || 0), 0);
+    const totalSaqs = allModules.reduce((sum, d) => sum + (d.saqs?.length || 0), 0); 
 
     return (
         <div className="max-w-6xl mx-auto p-6 h-full flex flex-col">
@@ -1162,10 +1182,10 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                         <h3 className="font-semibold text-slate-700 mb-4">Course Totals</h3>
                         <div className="grid grid-cols-2 gap-4">
-                            <div className="bg-slate-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-slate-800">{decks.length}</div><div className="text-xs text-slate-500 uppercase">Modules</div></div>
+                            <div className="bg-slate-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-slate-800">{allModules.length}</div><div className="text-xs text-slate-500 uppercase">Modules</div></div>
                             <div className="bg-indigo-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-indigo-600">{totalCards}</div><div className="text-xs text-indigo-400 uppercase">Cards</div></div>
                             <div className="bg-emerald-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-emerald-600">{totalQuestions}</div><div className="text-xs text-emerald-400 uppercase">Practice</div></div>
-                            <div className="bg-purple-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-purple-600">{totalSaqs}</div><div className="text-xs text-purple-400 uppercase">SAQs</div></div>
+                            <div className="bg-purple-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-purple-600">{totalSaqs}</div><div className="text-xs text-purple-400 uppercase">SAQs</div></div>                            <div className="bg-red-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-red-600">{folder.incorrectQuestions?.length || 0}</div><div className="text-xs text-red-400 uppercase">Incorrect</div></div>
                         </div>
                     </div>
 
@@ -1182,7 +1202,7 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }
                             <div className="flex items-center gap-2 mb-4 cursor-pointer" onClick={() => setGlobalShuffle(!globalShuffle)}>
                                 <div className={`w-5 h-5 rounded flex items-center justify-center border transition ${globalShuffle ? 'bg-white border-white text-indigo-600' : 'border-indigo-200 text-transparent'}`}>
                                     <Check size={14} strokeWidth={4} />
-                                </div>
+                                </div>                            <button onClick={() => onUpdateFolder({ ...folder, incorrectQuestions: [] })} className="text-xs text-red-200 hover:text-red-50 font-medium hover:underline">Clear Incorrect</button>
                                 <span className="text-sm font-medium text-indigo-50">Shuffle Cards</span>
                             </div>
                             <button onClick={() => setIsGlobalStudy(true)} disabled={totalCards === 0} className="w-full bg-white text-indigo-600 font-bold py-3 rounded-lg hover:bg-indigo-50 transition disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"><Zap size={18}/> Start Studying</button>
@@ -1191,7 +1211,7 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }
                         {/* MOCK EXAM CARD (Triggers Live Generation) */}
                         <div className="bg-gradient-to-br from-red-500 to-rose-600 p-6 rounded-xl shadow-md text-white">
                             <h3 className="font-bold text-lg mb-2 flex items-center gap-2"><FileQuestion/> Mock Exam</h3>
-                            <p className="text-red-100 text-sm mb-4">Generate a fresh exam paper from your modules.</p>
+                            <p className="text-red-100 text-sm mb-4">Generate a fresh exam paper from your {allModules.length} modules.</p>
                             <button onClick={() => setShowExamSetup(true)} disabled={decks.length === 0} className="w-full bg-white text-red-600 font-bold py-3 rounded-lg hover:bg-red-50 transition disabled:opacity-70 flex items-center justify-center gap-2"><Timer size={18}/> Build Exam</button>
                         </div>
                     </div>
@@ -1200,7 +1220,7 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }
             
             {showExamSetup && (
                 <ExamSetupModal 
-                    modules={decks} 
+                    modules={allModules} 
                     onClose={() => setShowExamSetup(false)} 
                     onStartExam={handleStartLiveExam} 
                 />
@@ -1212,7 +1232,7 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }
 export default function App() {
     const [folders, setFolders] = useState(() => JSON.parse(localStorage.getItem('studyGenieFolders')) || [{ id: 1, name: 'General' }]);
     const [decks, setDecks] = useState(() => {
-        const d = JSON.parse(localStorage.getItem('studyGenieData')) || [{ id: 101, folderId: 1, title: 'Example Module' }];
+        const d = JSON.parse(localStorage.getItem('studyGenieData')) || [{ id: 101, folderId: 1, title: 'Example Module', incorrectQuestions: [] }];
         return d.map(x => x.folderId ? x : { ...x, folderId: 1 });
     });
     const [userProfile, setUserProfile] = useState(() => JSON.parse(localStorage.getItem('studyGenieProfile')) || { age: '', degree: '' });
@@ -1266,7 +1286,7 @@ export default function App() {
                 onSettings={() => setShowSettings(true)}
             />
             <main className="flex-1 overflow-y-auto custom-scroll relative bg-[#f8fafc]">
-                {viewMode === 'folder' && activeFolder && <FolderDashboard folder={activeFolder} decks={decks.filter(d => d.folderId === activeFolder.id)} onUpdateFolder={updateFolder} apiKey={apiKey} />}
+                {viewMode === 'folder' && activeFolder && <FolderDashboard folder={activeFolder} decks={decks.filter(d => d.folderId === activeFolder.id)} onUpdateFolder={updateFolder} onUpdateDeck={updateDeck} apiKey={apiKey} />}
                 {viewMode === 'deck' && activeDeck && (
                     <>
                         {activeDeck.mode === 'dashboard' && <ModuleDashboard deck={activeDeck} onUpdateDeck={updateDeck} apiKey={apiKey} userProfile={userProfile} />}
