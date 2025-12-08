@@ -482,7 +482,7 @@ const ExamRunner = ({ questions, timeLimit, onBack, apiKey }) => {
             const userAns = answers[index] || "No answer provided.";
             const marks = q.marks || 5;
             const prompt = `Grade this SAQ out of ${marks}. Question: "${q.q}". Model: "${q.model}". Student: "${userAns}". Return JSON: { "score": number, "feedback": "string", "missing": "string" }`;
-            const result = await generateContent(apiKey, prompt, "", "");
+            const result = await generateContent(prompt, "", "");
             setSaqFeedback(prev => ({ ...prev, [index]: result }));
         } catch (e) { alert(e.message); } 
         finally { setGradingLoading(prev => ({ ...prev, [index]: false })); }
@@ -616,7 +616,7 @@ const SAQMode = ({ questions, onBack, apiKey }) => {
                 TASK: Grade the student answer out of ${marks}. Be critical but constructive.
                 RETURN JSON: { "score": number, "feedback": "Specific feedback", "missing": "Concepts missed" }
             `;
-            const result = await generateContent(apiKey, prompt, "", "");
+            const result = await generateContent(prompt, "", "");
             setFeedback(result);
         } catch (e) { alert(e.message); } finally { setGrading(false); }
     };
@@ -722,7 +722,7 @@ const FlashcardStudy = ({ cards, onBack, apiKey, onUpdateDeck, deck }) => {
     const getHelp = async (type) => {
         if (loadingHelp || !apiKey) return;
         setLoadingHelp(true);
-        try { const res = await generateContent(apiKey, `Provide a ${type} for: Q: ${currentCard.q}, A: ${currentCard.a}. Return JSON: {"text": "..."}`, ""); setAiHelp(res.text); } 
+        try { const res = await generateContent(`Provide a ${type} for: Q: ${currentCard.q}, A: ${currentCard.a}. Return JSON: {"text": "..."}`, ""); setAiHelp(res.text); } 
         catch(e) { alert("AI Error"); } finally { setLoadingHelp(false); }
     };
 
@@ -915,7 +915,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
                 else if (type === "saq") { prompt = `Generate ${currentBatchCount} Short Answer Questions (SAQ) testing deep understanding. Assign a mark value (2-7). JSON: [{"q": "...", "model": "...", "marks": 5}].`; } 
                 else { prompt = `Generate ${currentBatchCount} multiple choice questions (JSON: [{"q":..., "options":..., "a":..., "exp":...}]).`; }
                 try {
-                    const batchResult = await generateContent(apiKey, prompt, combinedContext, systemInstruction, attachmentPayload, currentBatchCount);
+                    const batchResult = await generateContent(prompt, combinedContext, systemInstruction, attachmentPayload, currentBatchCount);
                     const validatedResult = validateAndFixData(Array.isArray(batchResult) ? batchResult : [batchResult], type === 'exam' ? 'mcq' : type);
                     accumulatedResults = [...accumulatedResults, ...validatedResult];
                 } catch (batchError) { console.error(batchError); break; }
@@ -937,13 +937,13 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
              let mcqs = [];
              if(numMCQs > 0) {
                  const promptMCQ = `Generate ${numMCQs} HARD, scenario-based multiple choice questions for a FINAL EXAM. JSON: [{"q":..., "options":..., "a":..., "exp":...}]`;
-                 const rawMCQ = await generateContent(apiKey, promptMCQ, combinedContext, "", null, numMCQs);
+                 const rawMCQ = await generateContent(promptMCQ, combinedContext, "", null, numMCQs);
                  mcqs = validateAndFixData(Array.isArray(rawMCQ) ? rawMCQ : [rawMCQ], 'mcq');
             }
              let saqs = [];
              if(numSAQs > 0) {
                  const promptSAQ = `Generate ${numSAQs} Short Answer Questions (SAQ). Assign marks (2-7). JSON: [{"q":..., "model":..., "marks":5}]`;
-                 const rawSAQ = await generateContent(apiKey, promptSAQ, combinedContext, "", null, numSAQs);
+                 const rawSAQ = await generateContent(promptSAQ, combinedContext, "", null, numSAQs);
                  saqs = validateAndFixData(Array.isArray(rawSAQ) ? rawSAQ : [rawSAQ], 'saq');
              }
              const finalExam = [...mcqs, ...saqs];
@@ -1052,7 +1052,7 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }
             if (!allContent.trim()) return alert("No content found in modules!");
             const prompt = `Analyze 'STUDENT MATERIALS' against 'OFFICIAL SYLLABUS'. Return JSON: {"score": 0-100, "analysis": "summary", "missing": "missing topics"}`;
             const context = `OFFICIAL SYLLABUS:\n${syllabusText}\n\nSTUDENT MATERIALS:\n${allContent}`;
-            const result = await generateContent(apiKey, prompt, context, "", null, 1);
+            const result = await generateContent(prompt, context, "", null, 1);
             onUpdateFolder({ ...folder, syllabus: syllabusText, coverage: result });
         } catch (error) { 
             alert(error.message); 
@@ -1081,14 +1081,14 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }
             let mcqs = [];
             if(numMCQs > 0) {
                  const promptMCQ = `Generate ${numMCQs} HARD, scenario-based multiple choice questions for a FINAL EXAM. JSON: [{"q":..., "options":..., "a":..., "exp":...}]`;
-                 const rawMCQ = await generateContent(apiKey, promptMCQ, combinedContext, "", null, numMCQs);
+                 const rawMCQ = await generateContent(promptMCQ, combinedContext, "", null, numMCQs);
                  mcqs = validateAndFixData(Array.isArray(rawMCQ) ? rawMCQ : [rawMCQ], 'mcq');
             }
 
             let saqs = [];
             if(numSAQs > 0) {
                  const promptSAQ = `Generate ${numSAQs} Short Answer Questions (SAQ). Assign marks (2-7). JSON: [{"q":..., "model":..., "marks":5}]`;
-                 const rawSAQ = await generateContent(apiKey, promptSAQ, combinedContext, "", null, numSAQs);
+                 const rawSAQ = await generateContent(promptSAQ, combinedContext, "", null, numSAQs);
                  saqs = validateAndFixData(Array.isArray(rawSAQ) ? rawSAQ : [rawSAQ], 'saq');
             }
             
