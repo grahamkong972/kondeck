@@ -1253,7 +1253,6 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }
             incorrectQuestions: folder.incorrectQuestions || [],
             studyMode: globalStudyMode,
         };
-        const virtualDeck = { id: 'global', title: `${folder.name} (Global)`, studyMode: globalStudyMode, cards: allCards }; // Fixed variable name issue
         return <FlashcardStudy deck={globalDeck} onUpdateDeck={handleGlobalUpdate} onBack={() => setIsGlobalStudy(false)} apiKey={apiKey} />;
     }
 
@@ -1422,7 +1421,7 @@ export default function App() {
                 {viewMode === 'deck' && activeDeck && (
                     <>
                         {activeDeck.mode === 'dashboard' && <ModuleDashboard deck={activeDeck} onUpdateDeck={updateDeck} apiKey={apiKey} userProfile={userProfile} />}
-                        {activeDeck.mode === 'flashcards' && <FlashcardStudy cards={activeDeck.cards || []} deck={activeDeck} onUpdateDeck={updateDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} apiKey={apiKey} />}
+                        {activeDeck.mode === 'flashcards' && <FlashcardStudy deck={activeDeck} onUpdateDeck={updateDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} apiKey={apiKey} />}
                         {/* Using 'quiz' mode for practice, 'exam' mode passes special prop */}
                         {activeDeck.mode === 'quiz' && <ExamRunner questions={activeDeck.quiz || []} deck={activeDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} apiKey={apiKey} />}
                         {activeDeck.mode === 'exam' && <ExamRunner questions={activeDeck.exams || []} deck={activeDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} apiKey={apiKey} />}
