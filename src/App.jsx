@@ -1013,11 +1013,6 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
                                  <BookOpen size={18}/> Study Flashcards
                              </button>
                         </div>
-                        <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-2">
-                            <button onClick={() => onUpdateDeck({...deck, mode: 'quiz', quizMode: 'practice'})} disabled={!deck.quiz?.length} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition disabled:opacity-50 disabled:cursor-not-allowed"><Brain size={18}/> Practice Quiz</button>
-                            <button onClick={() => onUpdateDeck({...deck, mode: 'saq'})} disabled={!deck.saqs?.length} className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition disabled:opacity-50 disabled:cursor-not-allowed"><PenTool size={18}/> Practice SAQs</button>
-                            <button onClick={() => setShowExamSetup(true)} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition disabled:opacity-50 disabled:cursor-not-allowed"><FileQuestion size={18}/> Simulate Exam</button>
-                        </div>
                     </div>
                 </div>
             </div>
