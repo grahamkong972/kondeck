@@ -1090,22 +1090,15 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 flex-1 min-h-0">
                 <div className="lg:col-span-8 flex flex-col gap-4 h-full">
-                     {/* ... Syllabus Panel (Unchanged) ... */}
                      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex-1 flex flex-col">
                         <div className="flex items-center justify-between mb-4">
                             <h3 className="font-bold text-slate-700 flex items-center gap-2"><BookOpenText size={20} className="text-emerald-500"/> Course Syllabus</h3>
                             <button onClick={handleSaveSyllabus} className="text-xs text-indigo-600 font-medium hover:underline">Save Text</button>
                         </div>
                         <textarea className="flex-1 w-full p-4 bg-slate-50 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-sm font-mono leading-relaxed" placeholder="Paste course outline here..." value={syllabusText} onChange={(e) => setSyllabusText(e.target.value)} onBlur={handleSaveSyllabus}></textarea>
-                        <div className="mt-4">
-                            <button onClick={handleAnalyze} disabled={isAnalyzing} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70">
-                                {isAnalyzing ? <RotateCw className="animate-spin"/> : <PieChart/>} {isAnalyzing ? "Auditing..." : "Analyze Coverage"}
-                            </button>
-                        </div>
+                        <div className="mt-4"><button onClick={handleAnalyze} disabled={isAnalyzing} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70">{isAnalyzing ? <RotateCw className="animate-spin"/> : <PieChart/>} {isAnalyzing ? "Auditing..." : "Analyze Coverage"}</button></div>
                     </div>
                 </div>
-                
-                {/* RIGHT COLUMN - REARRANGED HERE */}
                 <div className="lg:col-span-4 space-y-6 overflow-y-auto">
                     
                     {/* 1. Global Buttons (Moved to Top) */}
@@ -1158,17 +1151,9 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }
                              <div className="bg-red-50 p-4 rounded-lg text-center col-span-2"><div className="text-2xl font-bold text-red-600">{totalExamQs}</div><div className="text-xs text-red-400 uppercase">Exam Qs</div></div>
                         </div>
                     </div>
-
                 </div>
             </div>
-            
-            {showExamSetup && (
-                <ExamSetupModal 
-                    modules={decks} 
-                    onClose={() => setShowExamSetup(false)} 
-                    onStartExam={handleStartLiveExam} 
-                />
-            )}
+            {showExamSetup && <ExamSetupModal modules={decks} onClose={() => setShowExamSetup(false)} onStartExam={handleStartLiveExam} />}
         </div>
     );
 };
