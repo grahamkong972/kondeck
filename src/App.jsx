@@ -131,7 +131,7 @@ const cleanAndParseJSON = (text) => {
              }
         }
         console.error("JSON Parse Error:", e);
-        throw new Error("Failed to parse AI response.");
+        throw new Error(`Failed to parse AI response: ${e.message}. Raw text: ${clean.substring(0, 500)}`);
     }
 };
 
