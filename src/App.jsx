@@ -191,11 +191,12 @@ const FormattedText = ({ text, className = "" }) => {
     );
 };
 
-// --- GEMINI AI SERVICE ---
-const generateContent = async (apiKey, prompt, context, systemInstruction, attachmentData = null, quantity = 1) => {
-    if (!apiKey) throw new Error("API Key is missing. Please add your own Google Gemini Key in Settings.");
-
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+// --- GEMINI AI SERVICE (Refactored to use Vercel Proxy) ---
+const generateContent = async (prompt, context, systemInstruction, attachmentData = null, quantity = 1) => {
+    // The apiKey check is now removed from the client side.
+    
+    // Define the client-side proxy endpoint
+    const PROXY_URL = `/api/generate-ai-content`; 
     
     const fullSystemPrompt = `
         You are Kongruence, an advanced AI tutor.
@@ -211,29 +212,35 @@ const generateContent = async (apiKey, prompt, context, systemInstruction, attac
 
     const contentsPart = [{ text: `CONTEXT:\n${context}\n\nTASK:\n${prompt}` }];
     if (attachmentData) {
-        contentsPart.push(attachmentData); 
+        contentsPart.push(attachmentData); 
         contentsPart[0].text += "\n\n[DOCUMENT CONTEXT]: Analyze the attached image or PDF document carefully.";
     }
 
+    const requestBody = {
+        contents: [{ parts: contentsPart }],
+        system_instruction: { parts: [{ text: fullSystemPrompt }] },
+        generationConfig: {
+            responseMimeType: "application/json"
+        }
+    };
+    
+    // The key is now handled by the proxy function on the server
     for (let attempt = 0; attempt < 3; attempt++) {
         try {
-            const response = await fetch(url, {
+            const response = await fetch(PROXY_URL, { // Use the proxy URL
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{ parts: contentsPart }],
-                    system_instruction: { parts: [{ text: fullSystemPrompt }] },
-                    generationConfig: {
-                        responseMimeType: "application/json"
-                    }
-                })
+                body: JSON.stringify(requestBody) // Send the full request body
             });
 
             if (response.status === 429) {
-                throw new Error("Quota Exceeded. Please wait a moment or check your Google Cloud billing.");
+                throw new Error("Quota Exceeded. Too many requests. Please wait a moment or check your Google Cloud billing.");
             }
 
-            if (!response.ok) throw new Error(`Direct API Error: ${response.statusText}`);
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(`AI Request Proxy Error: ${errorData.error || response.statusText}`);
+            }
             
             const data = await response.json();
             const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -243,8 +250,8 @@ const generateContent = async (apiKey, prompt, context, systemInstruction, attac
 
         } catch (error) {
             console.warn(`Attempt ${attempt + 1} failed:`, error.message);
-            if (attempt === 2) throw error; 
-            await sleep(2000 * (attempt + 1)); 
+            if (attempt === 2) throw error; 
+            await sleep(2000 * (attempt + 1)); 
         }
     }
 };
@@ -283,7 +290,7 @@ const AuthPage = ({ onAuthSuccess }) => {
     return (
         <div className="w-full h-screen flex items-center justify-center bg-slate-100">
             <div className="w-full max-w-sm p-8 bg-white rounded-2xl shadow-xl">
-                <h2 className="text-2xl font-bold text-center text-slate-800 mb-2">Study Genie</h2>
+                <h2 className="text-2xl font-bold text-center text-slate-800 mb-2">KonDeck</h2>
                 <p className="text-center text-slate-500 mb-6">{isLogin ? 'Welcome back!' : 'Create your account'}</p>
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} className="w-full p-3 border rounded-lg" required />
@@ -1196,7 +1203,6 @@ export default function App() {
     const [folders, setFolders] = useState([]);
     const [decks, setDecks] = useState([]);
     const [userProfile, setUserProfile] = useState({ age: '', degree: '' });
-    const [apiKey, setApiKey] = useState(() => localStorage.getItem('geminiKey') || ''); // Keep API key in localStorage for convenience
     const [viewMode, setViewMode] = useState('deck'); 
     const [activeId, setActiveId] = useState(null);
     const [showSettings, setShowSettings] = useState(false);
@@ -1248,10 +1254,6 @@ export default function App() {
         const userDocRef = doc(db, "users", user.uid);
         await updateDoc(userDocRef, newData);
     };
-
-    useEffect(() => {
-        localStorage.setItem('geminiKey', apiKey);
-    }, [apiKey]);
 
     const activeDeck = viewMode === 'deck' ? decks.find(d => d.id === activeId) : null;
     const activeFolder = viewMode === 'folder' ? folders.find(f => f.id === activeId) : null;
@@ -1323,19 +1325,20 @@ export default function App() {
             {showSettings && (
                 <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
                     <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md">
-                        <div className="flex justify-between items-center mb-6"><h3 className="font-bold text-lg">Settings</h3><button onClick={() => setShowSettings(false)}><X/></button></div>
+                        <div className="flex justify-between items-center mb-6"><h3 className="font-bold text-lg">Settings</h3><button onClick={() => setShowSettings(false)}><X /></button></div>
                         <div className="space-y-4">
-                            <div><label className="text-sm font-bold text-slate-600">Gemini API Key</label><input type="password" value={apiKey} onChange={e=>setApiKey(e.target.value)} className="w-full p-2 border rounded-lg mt-1"/></div>
-                            <div className="pt-4 border-t"><h4 className="font-bold mb-2">Profile</h4>
+                            <div className="pt-2">
+                                <h4 className="font-bold mb-2 text-slate-700">Profile Settings</h4>
                                 <div className="grid grid-cols-2 gap-2">
-                                    <input placeholder="Age" type="number" value={userProfile.age} onChange={e=>setUserProfile({...userProfile, age: e.target.value})} className="p-2 border rounded-lg"/>
-                                    <input placeholder="Degree" value={userProfile.degree} onChange={e=>setUserProfile({...userProfile, degree: e.target.value})} className="p-2 border rounded-lg"/>
+                                    <input placeholder="Age" type="number" value={userProfile.age} onChange={e => setUserProfile({ ...userProfile, age: e.target.value })} className="p-2 border rounded-lg" />
+                                    <input placeholder="Degree" value={userProfile.degree} onChange={e => setUserProfile({ ...userProfile, degree: e.target.value })} className="p-2 border rounded-lg" />
                                 </div>
+                                <p className="text-xs text-slate-500 mt-2">These details help the AI generate relevant content.</p>
                             </div>
                             <div className="pt-4 border-t flex flex-col gap-2">
                                 <button onClick={() => { updateFirestore({ profile: userProfile }); setShowSettings(false); }} className="w-full bg-indigo-600 text-white font-bold py-2 rounded-lg">Save Settings</button>
                                 <button onClick={handleLogout} className="w-full bg-red-500 text-white font-bold py-2 rounded-lg flex items-center justify-center gap-2">
-                                    <LogOut size={16}/> Logout
+                                    <LogOut size={16} /> Logout
                                 </button>
                             </div>
                         </div>
