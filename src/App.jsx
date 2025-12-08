@@ -829,8 +829,7 @@ const Sidebar = ({ user, folders, decks, activeId, viewMode, onSelectDeck, onSel
     );
 };
 
-// --- MODULE DASHBOARD (Restored & Fixed) ---
-const ModuleDashboard = ({ deck, onUpdateDeck, userProfile }) => {
+const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
     const [isGenerating, setIsGenerating] = useState(false);
     const [statusMessage, setStatusMessage] = useState("");
     const [genType, setGenType] = useState("flashcards");
@@ -913,7 +912,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile }) => {
                 else if (type === "saq") { prompt = `Generate ${currentBatchCount} Short Answer Questions (SAQ) testing deep understanding. Assign a mark value (2-7). JSON: [{"q": "...", "model": "...", "marks": 5}].`; } 
                 else { prompt = `Generate ${currentBatchCount} multiple choice questions (JSON: [{"q":..., "options":..., "a":..., "exp":...}]).`; }
                 try {
-                    const batchResult = await generateContent(prompt, combinedContext, systemInstruction, attachmentPayload, currentBatchCount);
+                    const batchResult = await generateContent(apiKey, prompt, combinedContext, systemInstruction, attachmentPayload, currentBatchCount);
                     const validatedResult = validateAndFixData(Array.isArray(batchResult) ? batchResult : [batchResult], type === 'exam' ? 'mcq' : type);
                     accumulatedResults = [...accumulatedResults, ...validatedResult];
                 } catch (batchError) { console.error(batchError); break; }
@@ -935,13 +934,13 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile }) => {
              let mcqs = [];
              if(numMCQs > 0) {
                  const promptMCQ = `Generate ${numMCQs} HARD, scenario-based multiple choice questions for a FINAL EXAM. JSON: [{"q":..., "options":..., "a":..., "exp":...}]`;
-                 const rawMCQ = await generateContent(promptMCQ, combinedContext, "", null, numMCQs);
+                 const rawMCQ = await generateContent(apiKey, promptMCQ, combinedContext, "", null, numMCQs);
                  mcqs = validateAndFixData(Array.isArray(rawMCQ) ? rawMCQ : [rawMCQ], 'mcq');
             }
              let saqs = [];
              if(numSAQs > 0) {
                  const promptSAQ = `Generate ${numSAQs} Short Answer Questions (SAQ). Assign marks (2-7). JSON: [{"q":..., "model":..., "marks":5}]`;
-                 const rawSAQ = await generateContent(promptSAQ, combinedContext, "", null, numSAQs);
+                 const rawSAQ = await generateContent(apiKey, promptSAQ, combinedContext, "", null, numSAQs);
                  saqs = validateAndFixData(Array.isArray(rawSAQ) ? rawSAQ : [rawSAQ], 'saq');
              }
              const finalExam = [...mcqs, ...saqs];
@@ -951,7 +950,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile }) => {
         } catch(e) { alert(e.message); } finally { setIsGenerating(false); setStatusMessage(""); }
     };
     
-    if (activeExamData) { return <ExamRunner questions={activeExamData} timeLimit={examTimeLimit} onBack={() => setActiveExamData(null)} />; }
+    if (activeExamData) { return <ExamRunner questions={activeExamData} timeLimit={examTimeLimit} onBack={() => setActiveExamData(null)} apiKey={apiKey} />; }
     if (isGenerating && statusMessage.includes("Exam")) { return (<div className="h-full flex flex-col items-center justify-center"><RotateCw className="animate-spin text-indigo-600 mb-4" size={48} /><h3 className="text-xl font-bold text-slate-800">Generating Exam Paper...</h3><p className="text-slate-500">Creating custom questions for {deck.title}</p></div>) }
 
     return (
@@ -1017,6 +1016,11 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile }) => {
                              <button onClick={() => onUpdateDeck({...deck, mode: 'flashcards'})} disabled={!deck.cards?.length} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition disabled:opacity-50 disabled:cursor-not-allowed">
                                  <BookOpen size={18}/> Study Flashcards
                              </button>
+                        </div>
+                        <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-2">
+                            <button onClick={() => onUpdateDeck({...deck, mode: 'quiz', quizMode: 'practice'})} disabled={!deck.quiz?.length} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition disabled:opacity-50 disabled:cursor-not-allowed"><Brain size={18}/> Practice Quiz</button>
+                            <button onClick={() => onUpdateDeck({...deck, mode: 'saq'})} disabled={!deck.saqs?.length} className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition disabled:opacity-50 disabled:cursor-not-allowed"><PenTool size={18}/> Practice SAQs</button>
+                            <button onClick={() => setShowExamSetup(true)} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition disabled:opacity-50 disabled:cursor-not-allowed"><FileQuestion size={18}/> Simulate Exam</button>
                         </div>
                     </div>
                 </div>
