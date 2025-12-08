@@ -263,6 +263,7 @@ const AuthPage = ({ onAuthSuccess }) => {
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
 
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
@@ -276,7 +277,11 @@ const AuthPage = ({ onAuthSuccess }) => {
                 const userDocRef = doc(db, "users", userCredential.user.uid);
                 await setDoc(userDocRef, {
                     folders: [{ id: 1, name: 'General' }],
-                    decks: [{ id: 101, folderId: 1, title: 'Example Module', content: 'Welcome! Add notes here.' }],
+                    decks: [{ id: 101, folderId: 1, title: 'Example Module', content: 'Welcome! Add notes here.', notes: 'Welcome! Add notes here.' }],
+                    subscription: {
+                        tier: 'free',
+                        credits: 180
+                    },
                     profile: { age: '', degree: '' },
                     createdAt: serverTimestamp()
                 });
@@ -474,13 +479,17 @@ const ExamRunner = ({ questions, timeLimit, onBack }) => {
         return acc;
     }, 0);
 
-    const gradeSAQ = async (index) => {
+    const gradeSAQ = async (index, userProfile) => {
+        if (userProfile.subscription?.tier !== 'pro') {
+            alert("AI Grading is a Pro feature. Please upgrade to use it.");
+            return;
+        }
         setGradingLoading(prev => ({ ...prev, [index]: true }));
         try {
             const q = questions[index];
             const userAns = answers[index] || "No answer provided.";
             const marks = q.marks || 5;
-            const prompt = `Grade this SAQ out of ${marks}. Question: "${q.q}". Model: "${q.model}". Student: "${userAns}". Return JSON: { "score": number, "feedback": "string", "missing": "string" }`;
+            const prompt = `Grade this SAQ out of ${marks}. Question: "${q.q}". Model: "${q.model}". Student: "${userAns}". Return JSON: { "score": number, "feedback": "string", "missing": "string" }`; // Note: This is a placeholder for the actual prompt
             const result = await generateContent(prompt, "", "");
             setSaqFeedback(prev => ({ ...prev, [index]: result }));
         } catch (e) { alert(e.message); } 
@@ -488,7 +497,7 @@ const ExamRunner = ({ questions, timeLimit, onBack }) => {
     };
 
     return (
-        <div className="max-w-4xl mx-auto p-6">
+        <div className="max-w-4xl mx-auto p-6" userProfile={userProfile}>
             <div className="flex justify-between items-center mb-8 sticky top-0 bg-[#f8fafc] py-4 z-10 border-b">
                 <button onClick={onBack} className="flex gap-2 text-slate-500 hover:text-indigo-600 font-medium"><ChevronLeft/> Exit</button>
                 {!submitted ? (
@@ -543,7 +552,7 @@ const ExamRunner = ({ questions, timeLimit, onBack }) => {
                                                 <div className="text-sm text-slate-700"><FormattedText text={q.model}/></div>
                                             </div>
                                             {!saqFeedback[idx] ? (
-                                                <button onClick={() => gradeSAQ(idx)} disabled={gradingLoading[idx]} className="px-4 py-2 bg-purple-600 text-white text-sm font-bold rounded-lg hover:bg-purple-700 transition flex items-center gap-2">
+                                                <button onClick={() => gradeSAQ(idx, userProfile)} disabled={gradingLoading[idx] || userProfile.subscription?.tier !== 'pro'} className="px-4 py-2 bg-purple-600 text-white text-sm font-bold rounded-lg hover:bg-purple-700 transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
                                                     {gradingLoading[idx] ? <RotateCw className="animate-spin" size={14}/> : <Sparkles size={14}/>} Grade with AI
                                                 </button>
                                             ) : (
@@ -591,13 +600,17 @@ const ExamRunner = ({ questions, timeLimit, onBack }) => {
 };
 
 // --- SAQ MODE ---
-const SAQMode = ({ questions, onBack }) => {
+const SAQMode = ({ questions, onBack, userProfile }) => {
     const [idx, setIdx] = useState(0);
     const [userAnswer, setUserAnswer] = useState("");
     const [grading, setGrading] = useState(false);
     const [feedback, setFeedback] = useState(null); 
 
     const question = questions[idx];
+    const isPro = userProfile.subscription?.tier === 'pro';
+    const handleProClick = () => {
+        if (!isPro) alert("AI Grading is a Pro feature. Please upgrade to unlock.");
+    };
 
     const handleGrade = async () => {
         if (!userAnswer.trim()) return alert("Please type an answer first.");
@@ -642,8 +655,8 @@ const SAQMode = ({ questions, onBack }) => {
                     ></textarea>
                     {!feedback && (
                         <div className="mt-4 flex justify-end">
-                            <button onClick={handleGrade} disabled={grading} className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition flex items-center gap-2 disabled:opacity-70">
-                                {grading ? <RotateCw className="animate-spin" size={18}/> : <CheckSquare size={18}/>} {grading ? "Grading..." : "Submit Answer"}
+                            <button onClick={isPro ? handleGrade : handleProClick} disabled={grading} className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition flex items-center gap-2 disabled:opacity-70">
+                                {grading ? <RotateCw className="animate-spin" size={18}/> : (isPro ? <CheckSquare size={18}/> : <Lock size={18}/>)} {grading ? "Grading..." : (isPro ? "Submit Answer" : "AI Grade (Pro)")}
                             </button>
                         </div>
                     )}
@@ -829,7 +842,7 @@ const Sidebar = ({ user, folders, decks, activeId, viewMode, onSelectDeck, onSel
     );
 };
 
-const ModuleDashboard = ({ deck, onUpdateDeck, userProfile }) => {
+const ModuleDashboard = ({ deck, onUpdateDeck, userProfile, onUpdateProfile }) => {
     const [isGenerating, setIsGenerating] = useState(false);
     const [statusMessage, setStatusMessage] = useState("");
     const [genType, setGenType] = useState("flashcards");
@@ -843,6 +856,14 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile }) => {
     const [examTimeLimit, setExamTimeLimit] = useState(0);
 
     const [inputs, setInputs] = useState({ notes: "", transcript: "", slides: "" });
+
+    const estimateCost = useCallback(() => {
+        const textLength = (inputs.notes?.length || 0) + (inputs.transcript?.length || 0) + (inputs.slides?.length || 0);
+        const baseCost = Math.ceil(textLength / 1000); // 1 credit per 1000 chars
+        const multiplier = genType === 'flashcards' ? 1 : 1.5; // MCQs/SAQs are more complex
+        const finalCost = Math.ceil(baseCost + (count * multiplier));
+        return finalCost;
+    }, [inputs, count, genType]);
 
     useEffect(() => {
         setInputs({ notes: deck.notes || deck.content || "", transcript: deck.transcript || "", slides: deck.slides || "" });
@@ -889,6 +910,13 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile }) => {
         const hasText = inputs.notes.trim() || inputs.transcript.trim() || inputs.slides.trim();
         const hasAttachment = !!attachment;
         if (!hasText && !hasAttachment) return alert("Please add text or a file.");
+
+        const cost = estimateCost();
+        if (userProfile.subscription.credits < cost) {
+            return alert(`Not enough credits. This action costs ${cost} credits, but you only have ${userProfile.subscription.credits}. Please upgrade or wait for your credits to refresh.`);
+        }
+        if (!confirm(`This will use an estimated ${cost} credits. Proceed?`)) return;
+
         setIsGenerating(true);
         setStatusMessage("Initializing...");
         const currentInputs = { ...inputs };
@@ -921,7 +949,13 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile }) => {
             const updatedDeck = { ...deck, ...currentInputs }; 
             updatedDeck[targetKey] = [...(deck[targetKey] || []), ...accumulatedResults];
             onUpdateDeck(updatedDeck);
-        } catch (error) { alert(error.message); } finally { setIsGenerating(false); setStatusMessage(""); }
+            const newCredits = userProfile.subscription.credits - cost;
+            onUpdateProfile({ ...userProfile, subscription: { ...userProfile.subscription, credits: newCredits } });
+
+        } catch (error) { 
+            alert(error.message); 
+        } finally { 
+            setIsGenerating(false); setStatusMessage(""); }
     };
 
     // Live Exam Generation for Module
@@ -974,12 +1008,12 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile }) => {
                         <div className="flex gap-4 text-sm text-slate-600 items-center">
                             <div className="relative"><input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*,application/pdf" className="hidden" /><button onClick={() => fileInputRef.current?.click()} className={`p-2 rounded-lg border transition flex items-center gap-2 ${attachment ? 'bg-indigo-50 border-indigo-200 text-indigo-600' : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-100'}`} title="Upload Slide Image or PDF">{attachment ? (attachment.type === 'pdf' ? <FileType size={18}/> : <ImageIcon size={18}/>) : <Plus size={18}/>} {attachment ? (attachment.type === 'pdf' ? "PDF" : "Image") : "File"}</button></div>
                             <div className="h-6 w-px bg-slate-300 mx-2 hidden sm:block"></div>
-                            <div className="flex items-center gap-2"><span className="font-medium text-slate-500">Count:</span><div className="relative flex items-center"><Hash size={14} className="absolute left-2.5 text-slate-400 pointer-events-none"/><input type="number" min="1" max="50" value={count} onChange={(e) => setCount(Number(e.target.value))} className="w-20 pl-8 pr-2 py-1.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none text-slate-700 font-medium"/></div></div>
+                            <div className="flex items-center gap-2"><span className="font-medium text-slate-500">Count:</span><div className="relative flex items-center"><Hash size={14} className="absolute left-2.5 text-slate-400 pointer-events-none"/><input type="number" min="1" max="50" value={count} onChange={(e) => setCount(Number(e.target.value))} className="w-20 pl-8 pr-2 py-1.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none text-slate-700 font-medium"/></div></div>                            
                         </div>
                         <div className="flex gap-2 w-full sm:w-auto">
-                            <button onClick={() => handleGenerate('flashcards')} disabled={isGenerating} className="flex-1 sm:flex-none bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 shadow-sm text-sm">{isGenerating ? <RotateCw className="animate-spin" size={16}/> : <Sparkles size={16}/>} {isGenerating ? statusMessage : "Cards"}</button>
-                            <button onClick={() => handleGenerate('mcq')} disabled={isGenerating} className="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 shadow-sm text-sm">{isGenerating ? <RotateCw className="animate-spin" size={16}/> : <Brain size={16}/>} {isGenerating ? statusMessage : "Quiz"}</button>
-                            <button onClick={() => handleGenerate('saq')} disabled={isGenerating} className="flex-1 sm:flex-none bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 shadow-sm text-sm">{isGenerating ? <RotateCw className="animate-spin" size={16}/> : <PenTool size={16}/>} {isGenerating ? statusMessage : "SAQ"}</button>
+                            <button onMouseEnter={() => setGenType('flashcards')} onClick={() => handleGenerate('flashcards')} disabled={isGenerating} className="flex-1 sm:flex-none bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 shadow-sm text-sm">{isGenerating && genType==='flashcards' ? <RotateCw className="animate-spin" size={16}/> : <Sparkles size={16}/>} {isGenerating && genType==='flashcards' ? statusMessage : `Cards (~${estimateCost()} Cr)`}</button>
+                            <button onMouseEnter={() => setGenType('mcq')} onClick={() => handleGenerate('mcq')} disabled={isGenerating} className="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 shadow-sm text-sm">{isGenerating && genType==='mcq' ? <RotateCw className="animate-spin" size={16}/> : <Brain size={16}/>} {isGenerating && genType==='mcq' ? statusMessage : `Quiz (~${estimateCost()} Cr)`}</button>
+                            <button onMouseEnter={() => setGenType('saq')} onClick={() => handleGenerate('saq')} disabled={isGenerating} className="flex-1 sm:flex-none bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 shadow-sm text-sm">{isGenerating && genType==='saq' ? <RotateCw className="animate-spin" size={16}/> : <PenTool size={16}/>} {isGenerating && genType==='saq' ? statusMessage : `SAQ (~${estimateCost()} Cr)`}</button>
                         </div>
                     </div>
                 </div>
@@ -1030,7 +1064,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile }) => {
 };
 
 // --- FOLDER DASHBOARD (Defined BEFORE ModuleDashboard) ---
-const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck }) => {
+const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, userProfile }) => {
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [syllabusText, setSyllabusText] = useState(folder.syllabus || "");
     const [isGlobalStudy, setIsGlobalStudy] = useState(false);
@@ -1045,6 +1079,10 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck }) => {
     const handleSaveSyllabus = () => onUpdateFolder({ ...folder, syllabus: syllabusText }); 
 
     const handleAnalyze = async () => {
+        if (userProfile.subscription?.tier !== 'pro') {
+            alert("Syllabus Coverage Analysis is a Pro feature. Please upgrade to use it.");
+            return;
+        }
         if (!syllabusText.trim()) return alert("Please paste the Course Outline first.");
         setIsAnalyzing(true);
         try {
@@ -1145,8 +1183,7 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck }) => {
                             <h3 className="font-bold text-slate-700 flex items-center gap-2"><BookOpenText size={20} className="text-emerald-500"/> Course Syllabus</h3>
                             <button onClick={handleSaveSyllabus} className="text-xs text-indigo-600 font-medium hover:underline">Save Text</button>
                         </div>
-                        <textarea className="flex-1 w-full p-4 bg-slate-50 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-sm font-mono leading-relaxed" placeholder="Paste course outline here..." value={syllabusText} onChange={(e) => setSyllabusText(e.target.value)} onBlur={handleSaveSyllabus}></textarea>
-                        <div className="mt-4"><button onClick={handleAnalyze} disabled={isAnalyzing} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70">{isAnalyzing ? <RotateCw className="animate-spin"/> : <PieChart/>} {isAnalyzing ? "Auditing..." : "Analyze Coverage"}</button></div>
+                        <textarea className="flex-1 w-full p-4 bg-slate-50 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-sm font-mono leading-relaxed" placeholder="Paste course outline here..." value={syllabusText} onChange={(e) => setSyllabusText(e.target.value)} onBlur={handleSaveSyllabus}></textarea>                        <div className="mt-4"><button onClick={handleAnalyze} disabled={isAnalyzing || userProfile.subscription?.tier !== 'pro'} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed">{isAnalyzing ? <RotateCw className="animate-spin"/> : (userProfile.subscription?.tier !== 'pro' ? <Lock/> : <PieChart/>)} {isAnalyzing ? "Auditing..." : (userProfile.subscription?.tier !== 'pro' ? "Analyze Coverage (Pro)" : "Analyze Coverage")}</button></div>
                     </div>
                 </div>
                 <div className="lg:col-span-4 space-y-6 overflow-y-auto">
@@ -1201,7 +1238,7 @@ export default function App() {
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
     const [folders, setFolders] = useState([]);
-    const [decks, setDecks] = useState([]);
+    const [decks, setDecks] = useState([]); // This holds all module data
     const [userProfile, setUserProfile] = useState({ age: '', degree: '' });
     const [viewMode, setViewMode] = useState('deck'); 
     const [activeId, setActiveId] = useState(null);
@@ -1229,16 +1266,20 @@ export default function App() {
         const unsubscribe = onSnapshot(userDocRef, (docSnap) => {
             if (docSnap.exists()) {
                 const data = docSnap.data();
-                const fetchedFolders = data.folders || [{ id: 1, name: 'General' }];
-                const fetchedDecks = data.decks || [{ id: 101, folderId: 1, title: 'Example Module' }];
+                const fetchedFolders = data.folders || [];
+                const fetchedDecks = data.decks || [];
                 setFolders(fetchedFolders);
                 setDecks(fetchedDecks);
-                setUserProfile(data.profile || { age: '', degree: '' });
+                setUserProfile({
+                    age: data.profile?.age || '',
+                    degree: data.profile?.degree || '',
+                    subscription: data.subscription || { tier: 'free', credits: 180 }
+                });
                 
                 if (!activeId && fetchedDecks.length > 0) {
                     setActiveId(fetchedDecks[0].id);
                     setViewMode('deck');
-                }
+                } else if (!activeId && fetchedFolders.length > 0) { setActiveId(fetchedFolders[0].id); setViewMode('folder'); }
             } else {
                 // This case is handled on signup, but as a fallback:
                 console.log("No user document found, creating one.");
@@ -1260,6 +1301,7 @@ export default function App() {
 
     const updateDeck = (d) => updateFirestore({ decks: decks.map(x => x.id === d.id ? d : x) });
     const updateFolder = (f) => updateFirestore({ folders: folders.map(x => x.id === f.id ? f : x) });
+    const updateProfile = (p) => { setUserProfile(p); updateFirestore({ profile: { age: p.age, degree: p.degree }, subscription: p.subscription }); };
     const deleteFolder = (id) => { if(confirm("Delete folder?")) { const newDecks = decks.filter(d => d.folderId !== id); const newFolders = folders.filter(f => f.id !== id); updateFirestore({ decks: newDecks, folders: newFolders }); setActiveId(null); }};
     const addDeck = (fid) => { const nid = Date.now(); updateFirestore({ decks: [...decks, { id: nid, folderId: fid, title: 'New Module', mode: 'dashboard' }] }); setViewMode('deck'); setActiveId(nid); };
     const deleteDeck = (id) => { if(confirm("Delete module?")) { const rem = decks.filter(d => d.id !== id); updateFirestore({ decks: rem }); if(activeId === id) setActiveId(rem[0]?.id || null); }};
@@ -1298,15 +1340,15 @@ export default function App() {
                 onSettings={() => setShowSettings(true)}
             />
             <main className="flex-1 overflow-y-auto custom-scroll relative bg-[#f8fafc]">
-                {viewMode === 'folder' && activeFolder && <FolderDashboard folder={activeFolder} decks={decks.filter(d => d.folderId === activeFolder.id)} onUpdateFolder={updateFolder} onUpdateDeck={updateDeck} />}
+                {viewMode === 'folder' && activeFolder && <FolderDashboard folder={activeFolder} decks={decks.filter(d => d.folderId === activeFolder.id)} onUpdateFolder={updateFolder} onUpdateDeck={updateDeck} userProfile={userProfile} />}
                 {viewMode === 'deck' && activeDeck && (
                     <>
-                        {activeDeck.mode === 'dashboard' && <ModuleDashboard deck={activeDeck} onUpdateDeck={updateDeck} userProfile={userProfile} />}
+                        {activeDeck.mode === 'dashboard' && <ModuleDashboard deck={activeDeck} onUpdateDeck={updateDeck} userProfile={userProfile} onUpdateProfile={updateProfile} />}
                         {activeDeck.mode === 'flashcards' && <FlashcardStudy cards={activeDeck.cards || []} deck={activeDeck} onUpdateDeck={updateDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} />}
                         {/* Using 'quiz' mode for practice, 'exam' mode passes special prop */}
-                        {activeDeck.mode === 'quiz' && <ExamRunner questions={activeDeck.quiz || []} deck={activeDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} />}
-                        {activeDeck.mode === 'exam' && <ExamRunner questions={activeDeck.exams || []} deck={activeDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} />}
-                        {activeDeck.mode === 'saq' && <SAQMode questions={activeDeck.saqs || []} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} />}
+                        {activeDeck.mode === 'quiz' && <ExamRunner questions={activeDeck.quiz || []} deck={activeDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} userProfile={userProfile} />}
+                        {activeDeck.mode === 'exam' && <ExamRunner questions={activeDeck.exams || []} deck={activeDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} userProfile={userProfile} />}
+                        {activeDeck.mode === 'saq' && <SAQMode questions={activeDeck.saqs || []} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} userProfile={userProfile} />}
                     </>
                 )}
 
@@ -1324,19 +1366,41 @@ export default function App() {
 
             {showSettings && (
                 <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-                    <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-md">
                         <div className="flex justify-between items-center mb-6"><h3 className="font-bold text-lg">Settings</h3><button onClick={() => setShowSettings(false)}><X /></button></div>
-                        <div className="space-y-4">
-                            <div className="pt-2">
+                        <div className="space-y-4 p-6">
+                            <div>
+                                <h4 className="font-bold mb-2 text-slate-700">Subscription</h4>
+                                <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
+                                    <div className="flex justify-between items-center">
+                                        <div>
+                                            <span className="text-sm font-bold text-indigo-600 capitalize">{userProfile.subscription?.tier || 'free'} Plan</span>
+                                            <p className="text-xs text-slate-500">{userProfile.subscription?.tier === 'pro' ? 'Full access to all features.' : 'Hobbyist plan for 1 subject.'}</p>
+                                        </div>
+                                        <div className="text-right">
+                                            <div className="font-bold text-slate-800">{userProfile.subscription?.credits}</div>
+                                            <div className="text-xs text-slate-500">Credits</div>
+                                        </div>
+                                    </div>
+                                    {userProfile.subscription?.tier !== 'pro' && (
+                                        <button className="mt-4 w-full bg-gradient-to-r from-amber-500 to-orange-500 text-white font-bold py-2 rounded-lg text-sm">Upgrade to Pro ($33.99/mo)</button>
+                                    )}
+                                </div>
+                            </div>
+                            <div>
                                 <h4 className="font-bold mb-2 text-slate-700">Profile Settings</h4>
                                 <div className="grid grid-cols-2 gap-2">
-                                    <input placeholder="Age" type="number" value={userProfile.age} onChange={e => setUserProfile({ ...userProfile, age: e.target.value })} className="p-2 border rounded-lg" />
-                                    <input placeholder="Degree" value={userProfile.degree} onChange={e => setUserProfile({ ...userProfile, degree: e.target.value })} className="p-2 border rounded-lg" />
+                                    <input placeholder="Age" type="number" value={userProfile.age} onChange={e => setUserProfile({ ...userProfile, age: e.target.value })} className="p-2 border rounded-lg" />                                    <input placeholder="Degree" value={userProfile.degree} onChange={e => setUserProfile({ ...userProfile, degree: e.target.value })} className="p-2 border rounded-lg" />
                                 </div>
                                 <p className="text-xs text-slate-500 mt-2">These details help the AI generate relevant content.</p>
                             </div>
-                            <div className="pt-4 border-t flex flex-col gap-2">
-                                <button onClick={() => { updateFirestore({ profile: userProfile }); setShowSettings(false); }} className="w-full bg-indigo-600 text-white font-bold py-2 rounded-lg">Save Settings</button>
+                        </div>
+                        <div className="p-4 bg-slate-50 border-t rounded-b-xl">
+                            <div className="flex flex-col gap-2">
+                                <button onClick={() => { 
+                                    updateProfile(userProfile); 
+                                    setShowSettings(false); 
+                                }} className="w-full bg-indigo-600 text-white font-bold py-2 rounded-lg">Save Settings</button>
                                 <button onClick={handleLogout} className="w-full bg-red-500 text-white font-bold py-2 rounded-lg flex items-center justify-center gap-2">
                                     <LogOut size={16} /> Logout
                                 </button>
