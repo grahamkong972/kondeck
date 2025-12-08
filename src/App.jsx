@@ -383,10 +383,10 @@ const ExamSetupModal = ({ modules, onClose, onStartExam }) => {
     const [timeLimit, setTimeLimit] = useState(120);
 
     const saqPercentage = 100 - mcqPercentage;
-    const mcqMarks = Math.round(totalMarks * (mcqPercentage / 100));
+    const mcqMarks = Math.floor(totalMarks * (mcqPercentage / 100));
     const saqMarks = totalMarks - mcqMarks;
     const numMCQs = mcqMarks;
-    const numSAQs = saqMarks > 0 ? Math.max(1, Math.round(saqMarks / 5)) : 0; 
+    const numSAQs = saqMarks > 0 ? Math.max(1, Math.round(saqMarks / 5)) : 0;
 
     const toggleModule = (id) => {
         setSelectedModuleIds(prev => prev.includes(id) ? prev.filter(m => m !== id) : [...prev, id]);
@@ -934,13 +934,13 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile }) => {
              let mcqs = [];
              if(numMCQs > 0) {
                  const promptMCQ = `Generate ${numMCQs} HARD, scenario-based multiple choice questions for a FINAL EXAM. JSON: [{"q":..., "options":..., "a":..., "exp":...}]`;
-                 const rawMCQ = await generateContent(apiKey, promptMCQ, combinedContext, "", null, numMCQs);
+                 const rawMCQ = await generateContent(promptMCQ, combinedContext, "", null, numMCQs);
                  mcqs = validateAndFixData(Array.isArray(rawMCQ) ? rawMCQ : [rawMCQ], 'mcq');
             }
              let saqs = [];
              if(numSAQs > 0) {
                  const promptSAQ = `Generate ${numSAQs} Short Answer Questions (SAQ). Assign marks (2-7). JSON: [{"q":..., "model":..., "marks":5}]`;
-                 const rawSAQ = await generateContent(apiKey, promptSAQ, combinedContext, "", null, numSAQs);
+                 const rawSAQ = await generateContent(promptSAQ, combinedContext, "", null, numSAQs);
                  saqs = validateAndFixData(Array.isArray(rawSAQ) ? rawSAQ : [rawSAQ], 'saq');
              }
              const finalExam = [...mcqs, ...saqs];
@@ -950,7 +950,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile }) => {
         } catch(e) { alert(e.message); } finally { setIsGenerating(false); setStatusMessage(""); }
     };
     
-    if (activeExamData) { return <ExamRunner questions={activeExamData} timeLimit={examTimeLimit} onBack={() => setActiveExamData(null)} apiKey={apiKey} />; }
+    if (activeExamData) { return <ExamRunner questions={activeExamData} timeLimit={examTimeLimit} onBack={() => setActiveExamData(null)} />; }
     if (isGenerating && statusMessage.includes("Exam")) { return (<div className="h-full flex flex-col items-center justify-center"><RotateCw className="animate-spin text-indigo-600 mb-4" size={48} /><h3 className="text-xl font-bold text-slate-800">Generating Exam Paper...</h3><p className="text-slate-500">Creating custom questions for {deck.title}</p></div>) }
 
     return (
