@@ -1330,11 +1330,12 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }
                                 <button onClick={() => setGlobalStudyMode('srs')} className={`flex-1 py-1.5 px-3 rounded-md text-sm font-bold transition ${globalStudyMode === 'srs' ? 'bg-white text-indigo-600 shadow' : 'text-indigo-100 hover:bg-white/10'}`}>Smart (SRS)</button>
                             </div>
                             {/* ... Shuffle toggle ... */}
-                            <div className="flex items-center gap-2 mb-4 cursor-pointer" onClick={() => setGlobalShuffle(!globalShuffle)}>
-                                <div className={`w-5 h-5 rounded flex items-center justify-center border transition ${globalShuffle ? 'bg-white border-white text-indigo-600' : 'border-indigo-200 text-transparent'}`}>
-                                    <Check size={14} strokeWidth={4} />
-                                </div>                                    <button onClick={() => onUpdateFolder({ ...folder, incorrectQuestions: [] })} className="text-xs text-red-200 hover:text-red-50 font-medium hover:underline">Clear Incorrect</button>
-                                <span className="text-sm font-medium text-indigo-50">Shuffle Cards</span>
+                            <div className="flex justify-between items-center mb-4">
+                                <div className="flex items-center gap-2 cursor-pointer" onClick={() => setGlobalShuffle(!globalShuffle)}>
+                                    <div className={`w-5 h-5 rounded flex items-center justify-center border transition ${globalShuffle ? 'bg-white border-white text-indigo-600' : 'border-indigo-200 text-transparent'}`}><Check size={14} strokeWidth={3} /></div>
+                                    <span className="text-sm font-medium text-indigo-50">Shuffle Cards</span>
+                                </div>
+                                <button onClick={() => onUpdateFolder({ ...folder, incorrectQuestions: [] })} className="text-xs text-red-200 hover:text-red-50 font-medium hover:underline">Clear Incorrect</button>
                             </div>
                             <button onClick={() => setIsGlobalStudy(true)} disabled={totalCards === 0} className="w-full bg-white text-indigo-600 font-bold py-3 rounded-lg hover:bg-indigo-50 transition disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"><Zap size={18}/> Start Studying</button>
                         </div>
