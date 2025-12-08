@@ -829,7 +829,7 @@ const Sidebar = ({ user, folders, decks, activeId, viewMode, onSelectDeck, onSel
     );
 };
 
-const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
+const ModuleDashboard = ({ deck, onUpdateDeck, userProfile }) => {
     const [isGenerating, setIsGenerating] = useState(false);
     const [statusMessage, setStatusMessage] = useState("");
     const [genType, setGenType] = useState("flashcards");
@@ -912,7 +912,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
                 else if (type === "saq") { prompt = `Generate ${currentBatchCount} Short Answer Questions (SAQ) testing deep understanding. Assign a mark value (2-7). JSON: [{"q": "...", "model": "...", "marks": 5}].`; } 
                 else { prompt = `Generate ${currentBatchCount} multiple choice questions (JSON: [{"q":..., "options":..., "a":..., "exp":...}]).`; }
                 try {
-                    const batchResult = await generateContent(apiKey, prompt, combinedContext, systemInstruction, attachmentPayload, currentBatchCount);
+                    const batchResult = await generateContent(prompt, combinedContext, systemInstruction, attachmentPayload, currentBatchCount);
                     const validatedResult = validateAndFixData(Array.isArray(batchResult) ? batchResult : [batchResult], type === 'exam' ? 'mcq' : type);
                     accumulatedResults = [...accumulatedResults, ...validatedResult];
                 } catch (batchError) { console.error(batchError); break; }
