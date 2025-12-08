@@ -448,7 +448,7 @@ const ExamSetupModal = ({ modules, onClose, onStartExam }) => {
 };
 
 // --- EXAM RUNNER ---
-const ExamRunner = ({ questions, timeLimit, onBack, apiKey }) => {
+const ExamRunner = ({ questions, timeLimit, onBack }) => {
     const [answers, setAnswers] = useState({});
     const [saqFeedback, setSaqFeedback] = useState({});
     const [submitted, setSubmitted] = useState(false);
@@ -475,7 +475,6 @@ const ExamRunner = ({ questions, timeLimit, onBack, apiKey }) => {
     }, 0);
 
     const gradeSAQ = async (index) => {
-        if (!apiKey) return alert("API Key required for grading.");
         setGradingLoading(prev => ({ ...prev, [index]: true }));
         try {
             const q = questions[index];
@@ -592,7 +591,7 @@ const ExamRunner = ({ questions, timeLimit, onBack, apiKey }) => {
 };
 
 // --- SAQ MODE ---
-const SAQMode = ({ questions, onBack, apiKey }) => {
+const SAQMode = ({ questions, onBack }) => {
     const [idx, setIdx] = useState(0);
     const [userAnswer, setUserAnswer] = useState("");
     const [grading, setGrading] = useState(false);
@@ -602,7 +601,6 @@ const SAQMode = ({ questions, onBack, apiKey }) => {
 
     const handleGrade = async () => {
         if (!userAnswer.trim()) return alert("Please type an answer first.");
-        if (!apiKey) return alert("API Key missing.");
 
         setGrading(true);
         const marks = question.marks || 5;
@@ -670,7 +668,7 @@ const SAQMode = ({ questions, onBack, apiKey }) => {
 };
 
 // --- FLASHCARD STUDY COMPONENT ---
-const FlashcardStudy = ({ cards, onBack, apiKey, onUpdateDeck, deck }) => {
+const FlashcardStudy = ({ cards, onBack, onUpdateDeck, deck }) => {
     const [idx, setIdx] = useState(0);
     const [flipped, setFlipped] = useState(false);
     const [aiHelp, setAiHelp] = useState(null);
@@ -720,7 +718,7 @@ const FlashcardStudy = ({ cards, onBack, apiKey, onUpdateDeck, deck }) => {
     }, [isSRS, flipped, nextStandard, prevStandard, handleRate]);
 
     const getHelp = async (type) => {
-        if (loadingHelp || !apiKey) return;
+        if (loadingHelp) return;
         setLoadingHelp(true);
         try { const res = await generateContent(`Provide a ${type} for: Q: ${currentCard.q}, A: ${currentCard.a}. Return JSON: {"text": "..."}`, ""); setAiHelp(res.text); } 
         catch(e) { alert("AI Error"); } finally { setLoadingHelp(false); }
@@ -832,7 +830,7 @@ const Sidebar = ({ user, folders, decks, activeId, viewMode, onSelectDeck, onSel
 };
 
 // --- MODULE DASHBOARD (Restored & Fixed) ---
-const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
+const ModuleDashboard = ({ deck, onUpdateDeck, userProfile }) => {
     const [isGenerating, setIsGenerating] = useState(false);
     const [statusMessage, setStatusMessage] = useState("");
     const [genType, setGenType] = useState("flashcards");
@@ -953,7 +951,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
         } catch(e) { alert(e.message); } finally { setIsGenerating(false); setStatusMessage(""); }
     };
     
-    if (activeExamData) { return <ExamRunner questions={activeExamData} timeLimit={examTimeLimit} onBack={() => setActiveExamData(null)} apiKey={apiKey} />; }
+    if (activeExamData) { return <ExamRunner questions={activeExamData} timeLimit={examTimeLimit} onBack={() => setActiveExamData(null)} />; }
     if (isGenerating && statusMessage.includes("Exam")) { return (<div className="h-full flex flex-col items-center justify-center"><RotateCw className="animate-spin text-indigo-600 mb-4" size={48} /><h3 className="text-xl font-bold text-slate-800">Generating Exam Paper...</h3><p className="text-slate-500">Creating custom questions for {deck.title}</p></div>) }
 
     return (
@@ -1030,7 +1028,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
 };
 
 // --- FOLDER DASHBOARD (Defined BEFORE ModuleDashboard) ---
-const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }) => {
+const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck }) => {
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [syllabusText, setSyllabusText] = useState(folder.syllabus || "");
     const [isGlobalStudy, setIsGlobalStudy] = useState(false);
@@ -1111,11 +1109,11 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }
             finalCards = [...globalCards].sort(() => Math.random() - 0.5);
         }
         const virtualDeck = { id: 'global', title: `${folder.name} (Global)`, studyMode: globalStudyMode, cards: finalCards };
-        return <FlashcardStudy cards={finalCards} deck={virtualDeck} apiKey={apiKey} onUpdateDeck={handleGlobalUpdate} onBack={() => setIsGlobalStudy(false)} />;
+        return <FlashcardStudy cards={finalCards} deck={virtualDeck} onUpdateDeck={handleGlobalUpdate} onBack={() => setIsGlobalStudy(false)} />;
     }
 
     if (activeExamData) {
-         return <ExamRunner questions={activeExamData} timeLimit={examTimeLimit} onBack={() => setActiveExamData(null)} apiKey={apiKey} />;
+         return <ExamRunner questions={activeExamData} timeLimit={examTimeLimit} onBack={() => setActiveExamData(null)} />;
     }
     
     if (isExamGenerating) {
@@ -1298,15 +1296,15 @@ export default function App() {
                 onSettings={() => setShowSettings(true)}
             />
             <main className="flex-1 overflow-y-auto custom-scroll relative bg-[#f8fafc]">
-                {viewMode === 'folder' && activeFolder && <FolderDashboard folder={activeFolder} decks={decks.filter(d => d.folderId === activeFolder.id)} onUpdateFolder={updateFolder} onUpdateDeck={updateDeck} apiKey={apiKey} />}
+                {viewMode === 'folder' && activeFolder && <FolderDashboard folder={activeFolder} decks={decks.filter(d => d.folderId === activeFolder.id)} onUpdateFolder={updateFolder} onUpdateDeck={updateDeck} />}
                 {viewMode === 'deck' && activeDeck && (
                     <>
-                        {activeDeck.mode === 'dashboard' && <ModuleDashboard deck={activeDeck} onUpdateDeck={updateDeck} apiKey={apiKey} userProfile={userProfile} />}
-                        {activeDeck.mode === 'flashcards' && <FlashcardStudy cards={activeDeck.cards || []} deck={activeDeck} onUpdateDeck={updateDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} apiKey={apiKey} />}
+                        {activeDeck.mode === 'dashboard' && <ModuleDashboard deck={activeDeck} onUpdateDeck={updateDeck} userProfile={userProfile} />}
+                        {activeDeck.mode === 'flashcards' && <FlashcardStudy cards={activeDeck.cards || []} deck={activeDeck} onUpdateDeck={updateDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} />}
                         {/* Using 'quiz' mode for practice, 'exam' mode passes special prop */}
-                        {activeDeck.mode === 'quiz' && <ExamRunner questions={activeDeck.quiz || []} deck={activeDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} apiKey={apiKey} />}
-                        {activeDeck.mode === 'exam' && <ExamRunner questions={activeDeck.exams || []} deck={activeDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} apiKey={apiKey} />}
-                        {activeDeck.mode === 'saq' && <SAQMode questions={activeDeck.saqs || []} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} apiKey={apiKey} />}
+                        {activeDeck.mode === 'quiz' && <ExamRunner questions={activeDeck.quiz || []} deck={activeDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} />}
+                        {activeDeck.mode === 'exam' && <ExamRunner questions={activeDeck.exams || []} deck={activeDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} />}
+                        {activeDeck.mode === 'saq' && <SAQMode questions={activeDeck.saqs || []} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} />}
                     </>
                 )}
 
