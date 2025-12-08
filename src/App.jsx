@@ -423,15 +423,6 @@ const ExamRunner = ({ questions, timeLimit, onBack, apiKey }) => {
 
     const mcqScore = calculateMcqScore();
 
-    useEffect(() => {
-        const idx = questions.indexOf(q);
-        if (answers[idx] === q.a) score++;
-        else incorrect.push({ ...q, userAnswer: answers[idx] });
-    });
-    setIncorrectQuestions(incorrect);
-    return score;
-    }, [answers, questions, mcqQuestions]);
-
     const gradeSAQ = async (index) => {
         if (!apiKey) return alert("API Key required for grading.");
         setGradingLoading(prev => ({ ...prev, [index]: true }));
