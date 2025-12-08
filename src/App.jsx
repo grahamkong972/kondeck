@@ -199,7 +199,7 @@ const generateContent = async (prompt, context, systemInstruction, attachmentDat
     const PROXY_URL = `/api/generate-ai-content`; 
     
     const fullSystemPrompt = `
-        You are Kongruence, an advanced AI tutor.
+        You are KonDeck, an advanced AI tutor.
         ${systemInstruction || ''}
         CRITICAL OUTPUT RULES:
         1. Return ONLY valid JSON.
