@@ -76,11 +76,17 @@ const validateAndFixData = (data, type) => {
     if (!Array.isArray(data)) return [];
     
     return data.map(item => {
+        if (!item) return null;
+
         if (type === 'flashcards') {
             return {
+                id: item.id || Math.random().toString(36).substr(2, 9),
                 q: String(item.q || "Error: Question missing"),
                 a: String(item.a || "Error: Answer missing"),
-                nextReview: item.nextReview || null 
+                nextReview: item.nextReview || null,
+                ease: item.ease || 2.5,
+                interval: item.interval || 0,
+                step: item.step || 0
             };
         }
         if (type === 'mcq' || type === 'exam') {
@@ -110,6 +116,7 @@ const validateAndFixData = (data, type) => {
 
 // --- NUCLEAR JSON PARSER ---
 const cleanAndParseJSON = (text) => {
+    if (!text) return null;
     let clean = text.replace(/```json/g, '').replace(/```/g, '').trim();
     clean = clean.replace(/\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})/g, "\\\\");
 
@@ -123,15 +130,8 @@ const cleanAndParseJSON = (text) => {
                 try { return JSON.parse(fixed); } catch (e2) { console.error("Repair failed", e2); }
             }
         }
-        if (clean.startsWith('{') && !clean.endsWith('}')) {
-             const lastQuote = clean.lastIndexOf('"');
-             if (lastQuote !== -1) {
-                 const fixed = clean.substring(0, lastQuote + 1) + '"}';
-                 try { return JSON.parse(fixed); } catch(e3) { console.error("Object repair failed", e3); }
-             }
-        }
         console.error("JSON Parse Error:", e);
-        throw new Error(`Failed to parse AI response: ${e.message}. Raw text: ${clean.substring(0, 500)}`);
+        return null;
     }
 };
 
@@ -178,8 +178,8 @@ const FormattedText = ({ text, className = "" }) => {
             .replace(/ewline/g, '<br/>') 
             .replace(/\\newline/g, '<br/>') 
             .replace(/\\\\n/g, '<br/>') 
-            .replace(/\\n/g, '<br/>')    
-            .replace(/\n/g, '<br/>')     
+            .replace(/\\n/g, '<br/>')   
+            .replace(/\n/g, '<br/>')    
             .replace(/\\textbf\{([^\}]+)\}/g, '<strong>$1</strong>')
             .replace(/\\text\{([^\}]+)\}/g, '$1')
             .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
@@ -191,7 +191,7 @@ const FormattedText = ({ text, className = "" }) => {
     );
 };
 
-// --- GEMINI AI SERVICE (DIRECT CLIENT MODE) ---
+// --- GEMINI AI SERVICE ---
 const generateContent = async (apiKey, prompt, context, systemInstruction, attachmentData = null, quantity = 1) => {
     if (!apiKey) throw new Error("API Key is missing. Please add your own Google Gemini Key in Settings.");
 
@@ -251,70 +251,76 @@ const generateContent = async (apiKey, prompt, context, systemInstruction, attac
 
 // --- AUTH COMPONENT ---
 const AuthPage = () => {
-    const [isLogin, setIsLogin] = useState(true);
-    const [email, setEmail] = useState("");
-    const [password, setPassword] = useState("");
-    const [error, setError] = useState("");
-    const [loading, setLoading] = useState(false);
+    return <div/>;
+};
 
-    const handleAuth = async (e) => {
-        e.preventDefault();
-        setError("");
-        setLoading(true);
-        try {
-            if (isLogin) {
-                await signInWithEmailAndPassword(auth, email, password);
-            } else {
-                await createUserWithEmailAndPassword(auth, email, password);
-            }
-        } catch (err) {
-            setError(err.message.replace("Firebase: ", ""));
-        } finally {
-            setLoading(false);
-        }
-    };
-
+// --- MODALS ---
+const NameModal = ({ isOpen, type, initialValue, onClose, onSave }) => {
+    const [value, setValue] = useState(initialValue);
+    const inputRef = useRef(null);
+    useEffect(() => { if (isOpen) { setValue(initialValue); setTimeout(() => inputRef.current?.focus(), 100); } }, [isOpen, initialValue]);
+    if (!isOpen) return null;
+    const handleSubmit = (e) => { e.preventDefault(); if (value.trim()) onSave(value.trim()); };
     return (
-        <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-8">
-                <div className="text-center mb-8">
-                    <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-indigo-100 text-indigo-600 mb-4">
-                        <GraduationCap size={24} />
-                    </div> 
-                    <h1 className="text-2xl font-bold text-slate-900">Welcome to Graham Kong</h1>
-                    <p className="text-slate-500 mt-2">Your AI-powered study companion.</p>
-                </div>
-                <form onSubmit={handleAuth} className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
-                        <div className="relative">
-                            <Mail className="absolute left-3 top-3 text-slate-400" size={18} />
-                            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="student@university.edu" required />
-                        </div>
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
+                <h3 className="font-bold text-lg text-slate-800 mb-4">{type === 'create' ? 'New Folder' : 'Rename Folder'}</h3>
+                <form onSubmit={handleSubmit}>
+                    <input ref={inputRef} type="text" value={value} onChange={(e) => setValue(e.target.value)} className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none mb-4 text-slate-800" placeholder="Folder Name"/>
+                    <div className="flex gap-2 justify-end">
+                        <button type="button" onClick={onClose} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition text-sm">Cancel</button>
+                        <button type="submit" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition text-sm font-bold">Save</button>
                     </div>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
-                        <div className="relative">
-                            <Lock className="absolute left-3 top-3 text-slate-400" size={18} />
-                            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="••••••••" required />
-                        </div>
-                    </div>
-                    {error && <div className="text-red-500 text-sm bg-red-50 p-3 rounded-lg flex items-center gap-2"><AlertCircle size={14}/> {error}</div>}
-                    <button type="submit" disabled={loading} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70">
-                        {loading ? <RotateCw className="animate-spin" size={20}/> : (isLogin ? "Sign In" : "Create Account")}
-                    </button>
                 </form>
-                <div className="mt-6 text-center">
-                    <button onClick={() => setIsLogin(!isLogin)} className="text-sm text-indigo-600 hover:text-indigo-800 font-medium">
-                        {isLogin ? "Need an account? Sign Up" : "Already have an account? Sign In"}
-                    </button>
+            </div>
+        </div>
+    );
+};
+
+const ManageModal = ({ type, items, onClose, onDeleteItem, onDeleteAll }) => {
+    return (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+                <div className="flex justify-between items-center p-6 border-b">
+                    <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
+                        {type === 'flashcards' ? <BookOpen className="text-indigo-500"/> : (type === 'saq' ? <PenTool className="text-purple-500"/> : <Brain className="text-emerald-500"/>)}
+                        Manage {type === 'flashcards' ? 'Flashcards' : (type === 'saq' ? 'SAQs' : 'Quiz Questions')}
+                    </h3>
+                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition"><X size={24}/></button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 custom-scroll">
+                    {items.length === 0 ? <div className="text-center text-slate-400 py-12">No items to show.</div> : (
+                        <div className="space-y-2">
+                            {items.map((item, i) => {
+                                const status = type === 'flashcards' ? getCardStatus(item) : null;
+                                return (
+                                    <div key={i} className="flex items-start gap-3 p-3 bg-slate-50 rounded-lg border border-slate-100 group hover:border-slate-300 transition">
+                                        <div className="flex flex-col items-center gap-1 mt-1">
+                                            <span className="text-xs font-bold text-slate-400">{i + 1}.</span>
+                                            {type === 'flashcards' && item.nextReview && <div className={`w-2 h-2 rounded-full ${getCardStatus(item).color.replace('text-', 'bg-').split(' ')[0]}`} title={getCardStatus(item).label}></div>}
+                                        </div>
+                                        <div className="flex-1 text-sm text-slate-700">
+                                            <div className="font-medium mb-1 flex items-center gap-2"><FormattedText text={item.q} /></div>
+                                            <div className="text-xs text-slate-500 line-clamp-1 opacity-70">
+                                                {type === 'flashcards' ? <FormattedText text={item.a} /> : (type === 'saq' ? 'Model Answer Provided' : 'Multiple Choice')}
+                                            </div>
+                                        </div>
+                                        <button onClick={() => onDeleteItem(i)} className="text-slate-400 hover:text-red-500 p-1 opacity-0 group-hover:opacity-100 transition" title="Delete Item"><Trash2 size={16}/></button>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+                <div className="p-4 border-t bg-slate-50 rounded-b-xl flex justify-between items-center">
+                    <span className="text-xs text-slate-500">{items.length} items total</span>
+                    <button onClick={onDeleteAll} className="text-sm text-red-600 hover:text-red-800 font-medium flex items-center gap-2 px-4 py-2 hover:bg-red-50 rounded-lg transition"><Trash2 size={16}/> Delete All</button>
                 </div>
             </div>
         </div>
     );
 };
 
-// --- EXAM SETUP MODAL ---
 const ExamSetupModal = ({ modules, onClose, onStartExam }) => {
     const [selectedModuleIds, setSelectedModuleIds] = useState(modules.map(m => m.id)); 
     const [totalMarks, setTotalMarks] = useState(100);
@@ -324,9 +330,8 @@ const ExamSetupModal = ({ modules, onClose, onStartExam }) => {
     const saqPercentage = 100 - mcqPercentage;
     const mcqMarks = Math.round(totalMarks * (mcqPercentage / 100));
     const saqMarks = totalMarks - mcqMarks;
-    const numMCQs = mcqPercentage === 0 ? 0 : Math.max(1, mcqMarks); // Ensure at least 1 MCQ if percentage > 0
-    // FIX: Ensure 0 SAQs if percentage is 0
-    const numSAQs = saqPercentage === 0 ? 0 : Math.max(1, Math.round(saqMarks / 5)); 
+    const numMCQs = mcqMarks;
+    const numSAQs = Math.max(1, Math.round(saqMarks / 5)); 
 
     const toggleModule = (id) => {
         setSelectedModuleIds(prev => prev.includes(id) ? prev.filter(m => m !== id) : [...prev, id]);
@@ -336,7 +341,7 @@ const ExamSetupModal = ({ modules, onClose, onStartExam }) => {
         if (selectedModuleIds.length === 0) return alert("Select at least one module.");
         onStartExam({
             moduleIds: selectedModuleIds,
-            numMCQs: mcqPercentage === 0 ? 0 : Math.max(1, numMCQs), // Ensure 0 MCQs if percentage is 0
+            numMCQs,
             numSAQs,
             timeLimit
         });
@@ -387,47 +392,32 @@ const ExamSetupModal = ({ modules, onClose, onStartExam }) => {
     );
 };
 
-// --- EXAM RUNNER (Fixed: Removed infinite loop) ---
+// --- EXAM RUNNER ---
 const ExamRunner = ({ questions, timeLimit, onBack, apiKey }) => {
     const [answers, setAnswers] = useState({});
     const [saqFeedback, setSaqFeedback] = useState({});
     const [submitted, setSubmitted] = useState(false);
     const [timeLeft, setTimeLeft] = useState(timeLimit ? timeLimit * 60 : 600); 
     const [gradingLoading, setGradingLoading] = useState({});
-    const [incorrectQuestions, setIncorrectQuestions] = useState([]); // State to store incorrect questions
 
     useEffect(() => {
         if (!submitted && timeLeft > 0) {
             const timer = setInterval(() => setTimeLeft(p => p - 1), 1000);
             return () => clearInterval(timer);
         } else if (timeLeft === 0 && !submitted) {
-            handleSubmit();
+            setSubmitted(true);
         }
     }, [submitted, timeLeft]);
 
     const formatTime = (s) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
-    
-    // Memoize the filtering so it doesn't re-run every render
-    const mcqQuestions = useMemo(() => questions.filter(q => q.type !== 'saq'), [questions]);
-    const mcqCount = mcqQuestions.length;
-    
-    // Derived state for stats - Calculated during render, but does NOT set state
-    const currentStats = useMemo(() => {
-        let score = 0;
-        const incorrect = [];
-        mcqQuestions.forEach((q) => {
-            const idx = questions.indexOf(q);
-            if (answers[idx] === q.a) score++;
-            else incorrect.push({ ...q, userAnswer: answers[idx] });
-        });
-        return { score, incorrect };
-    }, [answers, questions, mcqQuestions]);
 
-    const handleSubmit = () => {
-        setSubmitted(true);
-        // Only set state on submit, preventing the render loop
-        setIncorrectQuestions(currentStats.incorrect);
-    };
+    const mcqQuestions = questions.filter(q => q.type !== 'saq');
+    const mcqCount = mcqQuestions.length;
+    const mcqScore = mcqQuestions.reduce((acc, q) => {
+        const idx = questions.indexOf(q);
+        if (answers[idx] === q.a) return acc + 1;
+        return acc;
+    }, 0);
 
     const gradeSAQ = async (index) => {
         if (!apiKey) return alert("API Key required for grading.");
@@ -459,8 +449,8 @@ const ExamRunner = ({ questions, timeLimit, onBack, apiKey }) => {
             {submitted && (
                 <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 mb-8 flex justify-between items-center">
                     <div>
-                        <h2 className="text-lg font-bold text-slate-800">Exam Results</h2>
-                        <p className="text-slate-500">You scored {currentStats.score} / {mcqCount} on multiple choice.</p>
+                        <h2 className="text-lg font-bold text-slate-800">MCQ Results</h2>
+                        <p className="text-slate-500">You scored {mcqScore} / {mcqCount} on multiple choice.</p>
                     </div>
                     <div className="text-right">
                         <div className="text-xs font-bold text-slate-400 uppercase">SAQ Review</div>
@@ -508,8 +498,8 @@ const ExamRunner = ({ questions, timeLimit, onBack, apiKey }) => {
                                                         <span className="font-bold text-purple-800">AI Feedback</span>
                                                         <span className="bg-white px-2 py-1 rounded text-xs font-bold text-purple-600 border border-purple-200">Score: {saqFeedback[idx].score}/{q.marks || 5}</span>
                                                     </div>
-                                                    <p className="text-sm text-purple-900 mb-2">{saqFeedback[idx].feedback}</p>
-                                                    {saqFeedback[idx].missing && <div className="text-xs text-red-600 mt-2 pt-2 border-t border-purple-100"><strong>Missing:</strong> {saqFeedback[idx].missing}</div>}
+                                                    <div className="text-sm text-purple-900 mb-2"><FormattedText text={saqFeedback[idx].feedback}/></div>
+                                                    {saqFeedback[idx].missing && <div className="text-xs text-red-600 mt-2 pt-2 border-t border-purple-100"><strong>Missing:</strong> <FormattedText text={saqFeedback[idx].missing}/></div>}
                                                 </div>
                                             )}
                                         </div>
@@ -541,7 +531,7 @@ const ExamRunner = ({ questions, timeLimit, onBack, apiKey }) => {
                     );
                 })}
             </div>
-            {!submitted && <div className="sticky bottom-6 flex justify-center"><button onClick={handleSubmit} className="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-8 rounded-full shadow-xl transition hover:-translate-y-1">Submit Exam</button></div>}
+            {!submitted && <div className="sticky bottom-6 flex justify-center"><button onClick={() => setSubmitted(true)} className="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-8 rounded-full shadow-xl transition hover:-translate-y-1">Submit Exam</button></div>}
         </div>
     );
 };
@@ -625,129 +615,191 @@ const SAQMode = ({ questions, onBack, apiKey }) => {
 };
 
 // --- FLASHCARD STUDY COMPONENT ---
-const FlashcardStudy = ({ deck, onUpdateDeck, onBack, apiKey }) => {
-    const [currentIndex, setCurrentIndex] = useState(0);
-    const [isFlipped, setIsFlipped] = useState(false);
-    const [showSrsButtons, setShowSrsButtons] = useState(false);
-    const [sessionStats, setSessionStats] = useState({ reviewed: 0, learned: 0 });
+const FlashcardStudy = ({ cards, onBack, apiKey, onUpdateDeck, deck }) => {
+    const [idx, setIdx] = useState(0);
+    const [flipped, setFlipped] = useState(false);
+    const [aiHelp, setAiHelp] = useState(null);
+    const [loadingHelp, setLoadingHelp] = useState(false);
+    const [sessionComplete, setSessionComplete] = useState(false);
 
-    const cards = deck.cards || [];
+    // FIXED: Split cards into queue (SRS) or list (Standard) to avoid index crashes
     const isSRS = deck.studyMode === 'srs';
     
-    // Sort cards for SRS: Due/New first, then future reviews
+    // Memoize the working set of cards
     const activeCards = useMemo(() => {
-        if (!isSRS) return cards;
+        if (!isSRS) return cards; // Standard: just use list
         const now = Date.now();
-        return [...cards].sort((a, b) => {
-            const aDue = a.nextReview || 0;
-            const bDue = b.nextReview || 0;
-            // Prioritize: Overdue/Now (<= now) -> New (0/null) -> Future (> now)
-            const aIsDue = aDue <= now && aDue !== 0;
-            const bIsDue = bDue <= now && bDue !== 0;
-            if (aIsDue && !bIsDue) return -1;
-            if (!aIsDue && bIsDue) return 1;
-            if (!a.nextReview && b.nextReview) return -1; // New before future
-            if (a.nextReview && !b.nextReview) return 1;
-            return aDue - bDue;
-        });
+        // SRS: Only show cards that are New (no review) or Due (review <= now)
+        return cards.filter(c => !c.nextReview || c.nextReview <= now)
+                    .sort((a, b) => (a.nextReview || 0) - (b.nextReview || 0));
     }, [cards, isSRS]);
 
-    const currentCard = activeCards[currentIndex];
+    // Current card logic
+    const currentCard = isSRS ? activeCards[0] : cards[idx];
+
+    // Reset index if switching modes or decks
+    useEffect(() => {
+        if (!isSRS) setIdx(0);
+    }, [isSRS, deck.id]);
+
+    useEffect(() => {
+        // If SRS and no cards left, done. If Standard and empty, done.
+        if (isSRS && activeCards.length === 0 && cards.length > 0) setSessionComplete(true);
+        if (!isSRS && cards.length === 0) setSessionComplete(true);
+    }, [activeCards, cards, isSRS]);
 
     const handleFlip = () => {
-        setIsFlipped(!isFlipped);
-        if (isSRS && !isFlipped) setShowSrsButtons(true);
+        setIsFlipped(!flipped);
     };
 
-    const handleNext = () => {
-        setIsFlipped(false);
-        setShowSrsButtons(false);
-        setCurrentIndex((prev) => (prev + 1) % activeCards.length);
-    };
+    const nextStandard = useCallback(() => { 
+        setFlipped(false); 
+        setAiHelp(null); 
+        setIdx((prev) => (prev + 1) % cards.length); 
+    }, [cards.length]);
 
-    const handleSRS = (quality) => {
-        // Simple SRS Algorithm (Leitner-ish)
-        // quality: 0 (Again), 1 (Hard), 2 (Good), 3 (Easy)
-        const now = Date.now();
-        const day = 24 * 60 * 60 * 1000;
-        let interval = day;
+    const prevStandard = useCallback(() => { 
+        setFlipped(false); 
+        setAiHelp(null); 
+        setIdx((prev) => (prev - 1 + cards.length) % cards.length); 
+    }, [cards.length]);
 
-        if (quality === 0) interval = 10 * 60 * 1000; // 10 mins
-        else if (quality === 1) interval = day; // 1 day
-        else if (quality === 2) interval = 3 * day; // 3 days
-        else if (quality === 3) interval = 7 * day; // 7 days
-
-        const updatedCard = { ...currentCard, nextReview: now + interval };
-        const updatedCards = cards.map(c => c.id === currentCard.id || c.q === currentCard.q ? updatedCard : c);
+    const handleRate = useCallback((intervalMinutes) => {
+        if (!currentCard) return;
         
+        const now = Date.now();
+        const nextReview = now + (intervalMinutes * 60 * 1000);
+        
+        // Find the card in the MAIN card list to update it
+        // We use map to create a new array with the updated card
+        const updatedCards = cards.map(c => {
+            // Match by ID if available, or question text as fallback
+            if ((c.id && c.id === currentCard.id) || c.q === currentCard.q) {
+                return { ...c, nextReview };
+            }
+            return c;
+        });
+
+        // Optimistically update local state so the card disappears from activeCards immediately
         onUpdateDeck({ ...deck, cards: updatedCards });
-        setSessionStats(prev => ({ ...prev, reviewed: prev.reviewed + 1 }));
-        handleNext();
+        
+        // Reset UI
+        setFlipped(false);
+        setAiHelp(null);
+    }, [currentCard, cards, deck, onUpdateDeck]);
+
+    // Keyboard Shortcuts
+    useEffect(() => {
+        const h = (e) => { 
+            if (e.code === 'Space') { 
+                e.preventDefault(); 
+                setFlipped(p => !p); 
+            } 
+            else if (!isSRS && e.code === 'ArrowRight') nextStandard(); 
+            else if (!isSRS && e.code === 'ArrowLeft') prevStandard();
+            else if (isSRS && flipped) {
+                if (e.key === '1') handleRate(1);      // Again
+                if (e.key === '2') handleRate(10);     // Hard
+                if (e.key === '3') handleRate(1440);   // Good
+                if (e.key === '4') handleRate(5760);   // Easy
+            }
+        };
+        window.addEventListener('keydown', h); 
+        return () => window.removeEventListener('keydown', h);
+    }, [isSRS, flipped, nextStandard, prevStandard, handleRate]);
+
+    const getHelp = async (type) => {
+        if (loadingHelp || !apiKey) return;
+        setLoadingHelp(true);
+        try { 
+            const res = await generateContent(apiKey, `Provide a ${type} for: Q: ${currentCard.q}, A: ${currentCard.a}. Return JSON: {"text": "..."}`, ""); 
+            setAiHelp(res.text); 
+        } catch(e) { 
+            alert("AI Error"); 
+        } finally { 
+            setLoadingHelp(false); 
+        }
     };
 
-    if (!currentCard) return <div className="p-10 text-center text-slate-500">No cards available. Generate some first!</div>;
+    if (sessionComplete) {
+         return (
+             <div className="h-full flex flex-col items-center justify-center p-8 text-center">
+                 <div className="bg-emerald-100 p-6 rounded-full mb-6 text-emerald-600"><CheckCircle size={48}/></div>
+                 <h2 className="text-3xl font-bold text-slate-800 mb-2">All Done!</h2>
+                 <p className="text-slate-500 mb-6">You've reviewed all cards due for now.</p>
+                 <button onClick={onBack} className="px-6 py-3 bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition">Back to Dashboard</button>
+             </div>
+         );
+    }
+    
+    if (!currentCard) return <div className="h-full flex items-center justify-center text-slate-400">Loading cards...</div>;
+
+    const status = getCardStatus(currentCard);
 
     return (
-        <div className="h-full flex flex-col max-w-4xl mx-auto p-6">
-             <div className="flex justify-between items-center mb-6">
-                <button onClick={onBack} className="flex gap-2 text-slate-500 hover:text-indigo-600 font-medium"><ChevronLeft/> Back to Dashboard</button>
-                <div className="flex items-center gap-4">
-                    <div className="text-sm font-medium text-slate-500">Session: {sessionStats.reviewed} reviewed</div>
-                    <div className="text-sm font-bold text-slate-700">{currentIndex + 1} / {activeCards.length}</div>
-                </div>
-            </div>
+        <div className="h-full flex flex-col p-6 max-w-4xl mx-auto w-full">
+            <button onClick={onBack} className="self-start mb-4 flex gap-2 text-slate-500 hover:text-indigo-600 font-medium"><ChevronLeft/> Back</button>
+            <div className="flex-1 flex flex-col items-center justify-center relative perspective-1000">
+                
+                {/* Standard Mode Arrows */}
+                {!isSRS && (
+                    <>
+                        <button onClick={prevStandard} className="absolute left-0 p-3 bg-white rounded-full shadow hover:scale-110 transition z-10"><ChevronLeft/></button>
+                        <button onClick={nextStandard} className="absolute right-0 p-3 bg-white rounded-full shadow hover:scale-110 transition z-10"><ChevronRight/></button>
+                    </>
+                )}
 
-            <div className="flex-1 flex flex-col justify-center items-center perspective-1000">
-                <div 
-                    onClick={handleFlip}
-                    className={`relative w-full max-w-2xl aspect-[3/2] bg-white rounded-2xl shadow-xl border border-slate-200 cursor-pointer transition-all duration-500 transform-style-3d ${isFlipped ? 'rotate-y-180' : ''}`}
-                >
-                    {/* Front */}
-                    <div className="absolute inset-0 backface-hidden flex flex-col items-center justify-center p-8 text-center">
-                        <span className="absolute top-6 left-6 text-xs font-bold text-slate-400 uppercase tracking-wider">Question</span>
-                        <div className="prose prose-lg text-slate-800">
-                            <FormattedText text={currentCard.q} />
+                <div className="w-full max-w-2xl h-96 relative cursor-pointer" onClick={handleFlip}>
+                    <div className="w-full h-full relative shadow-2xl rounded-2xl" style={{ transformStyle: 'preserve-3d', transition: 'transform 0.6s', transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)' }}>
+                        {/* Front */}
+                        <div className="absolute w-full h-full bg-white rounded-2xl backface-hidden flex flex-col items-center justify-center p-8 border" style={{ backfaceVisibility: 'hidden' }}>
+                            <span className={`absolute top-6 right-6 px-3 py-1 rounded-full text-xs font-bold border ${status.color}`}>
+                                {status.label}
+                            </span>
+                            <div className="text-2xl font-medium text-center"><FormattedText text={currentCard.q}/></div>
+                            <div className="absolute bottom-6 text-slate-400 text-sm animate-pulse">Click to Flip</div>
                         </div>
-                        <span className="absolute bottom-6 text-sm text-slate-400">Click to flip</span>
+
+                        {/* Back */}
+                        <div className="absolute w-full h-full bg-indigo-600 rounded-2xl backface-hidden flex flex-col items-center justify-center p-8 text-white" style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}>
+                            <div className="text-xl font-medium text-center overflow-y-auto max-h-full custom-scroll"><FormattedText text={currentCard.a}/></div>
+                            
+                            <div className="absolute bottom-6 flex gap-2" onClick={e => e.stopPropagation()}>
+                                <button onClick={() => getHelp('simplify')} disabled={loadingHelp} className="px-3 py-1 bg-white/20 hover:bg-white/30 rounded-full text-xs font-bold border border-white/10 flex items-center gap-1">{loadingHelp ? <RotateCw className="animate-spin" size={12}/> : null} Simplify</button>
+                                <button onClick={() => getHelp('mnemonic')} disabled={loadingHelp} className="px-3 py-1 bg-white/20 hover:bg-white/30 rounded-full text-xs font-bold border border-white/10 flex items-center gap-1">{loadingHelp ? <RotateCw className="animate-spin" size={12}/> : null} Mnemonic</button>
+                            </div>
+                        </div>
                     </div>
-
-                    {/* Back */}
-                    <div className="absolute inset-0 backface-hidden rotate-y-180 flex flex-col items-center justify-center p-8 text-center bg-indigo-50/30">
-                         <span className="absolute top-6 left-6 text-xs font-bold text-indigo-400 uppercase tracking-wider">Answer</span>
-                         <div className="prose prose-lg text-slate-800">
-                            <FormattedText text={currentCard.a} />
-                        </div>
-                    </div>
                 </div>
+                
+                {/* SRS Controls - Only show when flipped and in SRS Mode */}
+                {isSRS && flipped && (
+                    <div className="mt-8 flex gap-3 animate-fade-in-up">
+                        <button onClick={() => handleRate(1)} className="flex flex-col items-center px-6 py-3 bg-red-100 hover:bg-red-200 text-red-700 rounded-xl transition border-b-4 border-red-200 hover:border-red-300 active:border-b-0 active:translate-y-1"><span className="font-bold">Again</span><span className="text-[10px] opacity-70">1m (1)</span></button>
+                        <button onClick={() => handleRate(10)} className="flex flex-col items-center px-6 py-3 bg-orange-100 hover:bg-orange-200 text-orange-700 rounded-xl transition border-b-4 border-orange-200 hover:border-orange-300 active:border-b-0 active:translate-y-1"><span className="font-bold">Hard</span><span className="text-[10px] opacity-70">10m (2)</span></button>
+                        <button onClick={() => handleRate(1440)} className="flex flex-col items-center px-6 py-3 bg-emerald-100 hover:bg-emerald-200 text-emerald-700 rounded-xl transition border-b-4 border-emerald-200 hover:border-emerald-300 active:border-b-0 active:translate-y-1"><span className="font-bold">Good</span><span className="text-[10px] opacity-70">1d (3)</span></button>
+                        <button onClick={() => handleRate(5760)} className="flex flex-col items-center px-6 py-3 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-xl transition border-b-4 border-blue-200 hover:border-blue-300 active:border-b-0 active:translate-y-1"><span className="font-bold">Easy</span><span className="text-[10px] opacity-70">4d (4)</span></button>
+                    </div>
+                )}
+                
+                {/* Standard Mode Navigation Hint */}
+                {!isSRS && flipped && (
+                     <div className="mt-8">
+                         <button onClick={nextStandard} className="px-8 py-3 bg-slate-800 text-white rounded-full font-bold shadow-lg hover:bg-slate-700 transition">Next Card</button>
+                     </div>
+                )}
 
-                <div className="mt-8 h-20 w-full max-w-2xl flex items-center justify-center">
-                    {isSRS && showSrsButtons ? (
-                         <div className="grid grid-cols-4 gap-3 w-full animate-fade-in-up">
-                            <button onClick={(e) => { e.stopPropagation(); handleSRS(0); }} className="p-3 rounded-lg bg-red-100 text-red-700 font-bold hover:bg-red-200 transition">Again<div className="text-[10px] font-normal opacity-70">10m</div></button>
-                            <button onClick={(e) => { e.stopPropagation(); handleSRS(1); }} className="p-3 rounded-lg bg-orange-100 text-orange-700 font-bold hover:bg-orange-200 transition">Hard<div className="text-[10px] font-normal opacity-70">1d</div></button>
-                            <button onClick={(e) => { e.stopPropagation(); handleSRS(2); }} className="p-3 rounded-lg bg-blue-100 text-blue-700 font-bold hover:bg-blue-200 transition">Good<div className="text-[10px] font-normal opacity-70">3d</div></button>
-                            <button onClick={(e) => { e.stopPropagation(); handleSRS(3); }} className="p-3 rounded-lg bg-emerald-100 text-emerald-700 font-bold hover:bg-emerald-200 transition">Easy<div className="text-[10px] font-normal opacity-70">7d</div></button>
-                         </div>
-                    ) : (
-                        <div className="flex gap-4">
-                             <button onClick={handleFlip} className="px-6 py-2 rounded-full bg-white border border-slate-300 shadow-sm text-slate-600 font-medium hover:bg-slate-50 transition">
-                                {isFlipped ? "Flip Back" : "Show Answer"}
-                            </button>
-                            {!isSRS && isFlipped && (
-                                <button onClick={handleNext} className="px-6 py-2 rounded-full bg-indigo-600 text-white shadow-md font-bold hover:bg-indigo-700 transition flex items-center gap-2">
-                                    Next Card <ChevronRight size={16}/>
-                                </button>
-                            )}
-                        </div>
-                    )}
+                {aiHelp && <div className="mt-6 bg-white p-4 rounded-lg shadow border border-indigo-100 max-w-xl w-full text-sm text-slate-700 animate-fade-in"><strong className="text-indigo-600 block mb-1">AI Helper:</strong> <FormattedText text={aiHelp}/></div>}
+                
+                <div className="mt-8 text-slate-400 font-medium">
+                    {isSRS ? `Review Queue: ${activeCards.length}` : `Card ${idx + 1} / ${cards.length}`}
                 </div>
             </div>
         </div>
     );
 };
 
-// ... Sidebar, ManageModal, NameModal ...
-
+// --- SIDEBAR COMPONENT ---
 const Sidebar = ({ folders, decks, activeId, viewMode, onSelectDeck, onSelectFolder, onAddFolder, onDeleteFolder, onRenameFolder, onAddDeck, onDeleteDeck, onSettings }) => {
     const [expandedFolders, setExpandedFolders] = useState({});
     const toggleFolder = (folderId) => setExpandedFolders(prev => ({ ...prev, [folderId]: !prev[folderId] }));
@@ -764,7 +816,7 @@ const Sidebar = ({ folders, decks, activeId, viewMode, onSelectDeck, onSelectFol
         <div className="w-full md:w-72 bg-slate-900 text-white flex flex-col h-screen fixed md:relative z-20 shadow-xl border-r border-slate-800">
             <div className="p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
                 <h1 className="font-bold text-xl flex items-center gap-2"><GraduationCap className="text-indigo-400" /> Kongruence</h1>
-                <button onClick={onSettings} className="hover:text-indigo-400 transition"><Settings size={18}/></button> 
+                <button onClick={onSettings} className="hover:text-indigo-400 transition"><Settings size={18}/></button>
             </div>
             <div className="flex-1 overflow-y-auto custom-scroll p-4 space-y-6">
                 {folders.map(folder => (
@@ -800,460 +852,101 @@ const Sidebar = ({ folders, decks, activeId, viewMode, onSelectDeck, onSelectFol
             </div>
             <div className="p-4 border-t border-slate-800 shrink-0">
                 <button onClick={onAddFolder} className="w-full flex items-center justify-center gap-2 p-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-sm text-slate-300 hover:text-white transition font-medium border border-slate-700"><Plus size={16} /> New Folder</button>
-                <button onClick={() => signOut(auth)} className="w-full flex items-center justify-center gap-2 p-2.5 hover:bg-red-900/30 text-slate-400 hover:text-red-400 rounded-lg text-sm transition"><LogOut size={16}/> Sign Out</button>
             </div>
         </div>
     );
 };
 
-const ManageModal = ({ type, items, onClose, onDeleteItem, onDeleteAll }) => {
-    return (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col">
-                <div className="flex justify-between items-center p-6 border-b">
-                    <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
-                        {type === 'flashcards' ? <BookOpen className="text-indigo-500"/> : (type === 'saq' ? <PenTool className="text-purple-500"/> : <Brain className="text-emerald-500"/>)}
-                        Manage {type === 'flashcards' ? 'Flashcards' : (type === 'saq' ? 'SAQs' : 'Quiz Questions')}
-                    </h3>
-                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition"><X size={24}/></button>
-                </div>
-                <div className="flex-1 overflow-y-auto p-4 custom-scroll">
-                    {items.length === 0 ? <div className="text-center text-slate-400 py-12">No items to show.</div> : (
-                        <div className="space-y-2">
-                            {items.map((item, i) => (
-                                <div key={i} className="flex items-start gap-3 p-3 bg-slate-50 rounded-lg border border-slate-100 group hover:border-slate-300 transition">
-                                    <div className="flex flex-col items-center gap-1 mt-1">
-                                        <span className="text-xs font-bold text-slate-400">{i + 1}.</span>
-                                        {type === 'flashcards' && item.nextReview && <div className={`w-2 h-2 rounded-full ${getCardStatus(item).color.replace('text-', 'bg-').split(' ')[0]}`} title={getCardStatus(item).label}></div>}
-                                    </div>
-                                    <div className="flex-1 text-sm text-slate-700">
-                                        <div className="font-medium mb-1 flex items-center gap-2"><FormattedText text={item.q} /></div>
-                                        <div className="text-xs text-slate-500 line-clamp-1 opacity-70">
-                                            {type === 'flashcards' ? <FormattedText text={item.a} /> : (type === 'saq' ? 'Model Answer Provided' : 'Multiple Choice')}
-                                        </div>
-                                    </div>
-                                    <button onClick={() => onDeleteItem(i)} className="text-slate-400 hover:text-red-500 p-1 opacity-0 group-hover:opacity-100 transition" title="Delete Item"><Trash2 size={16}/></button>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
-                <div className="p-4 border-t bg-slate-50 rounded-b-xl flex justify-between items-center">
-                    <span className="text-xs text-slate-500">{items.length} items total</span>
-                    <button onClick={onDeleteAll} className="text-sm text-red-600 hover:text-red-800 font-medium flex items-center gap-2 px-4 py-2 hover:bg-red-50 rounded-lg transition"><Trash2 size={16}/> Delete All</button>
-                </div>
-            </div>
-        </div>
-    );
-};
-
-const NameModal = ({ isOpen, type, initialValue, onClose, onSave }) => {
-    const [value, setValue] = useState(initialValue);
-    const inputRef = useRef(null);
-    useEffect(() => { if (isOpen) { setValue(initialValue); setTimeout(() => inputRef.current?.focus(), 100); } }, [isOpen, initialValue]);
-    if (!isOpen) return null;
-    const handleSubmit = (e) => { e.preventDefault(); if (value.trim()) onSave(value.trim()); };
-    return (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
-                <h3 className="font-bold text-lg text-slate-800 mb-4">{type === 'create' ? 'New Folder' : 'Rename Folder'}</h3>
-                <form onSubmit={handleSubmit}>
-                    <input ref={inputRef} type="text" value={value} onChange={(e) => setValue(e.target.value)} className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none mb-4 text-slate-800" placeholder="Folder Name"/>
-                    <div className="flex gap-2 justify-end">
-                        <button type="button" onClick={onClose} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition text-sm">Cancel</button>
-                        <button type="submit" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition text-sm font-bold">Save</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    );
-};
-
-const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
-    const [isGenerating, setIsGenerating] = useState(false);
-    const [statusMessage, setStatusMessage] = useState("");
-    const [genType, setGenType] = useState("flashcards");
-    const [count, setCount] = useState(10);
-    const [activeTab, setActiveTab] = useState('notes');
-    const fileInputRef = useRef(null);
-    const [attachment, setAttachment] = useState(null);
-    
-    // Management Modal State
-    const [manageMode, setManageMode] = useState(null); 
-    const [activeExamData, setActiveExamData] = useState(null);
-    const [examTimeLimit, setExamTimeLimit] = useState(0);
-
-    const [inputs, setInputs] = useState({ notes: "", transcript: "", slides: "" });
-
-    useEffect(() => {
-        setInputs({ notes: deck.notes || deck.content || "", transcript: deck.transcript || "", slides: deck.slides || "" });
-        setAttachment(null); 
-    }, [deck.id]);
-
-    const handleInputChange = (field, value) => {
-        const newInputs = { ...inputs, [field]: value };
-        setInputs(newInputs);
-        onUpdateDeck({ ...deck, ...newInputs });
-    };
-
-    // DELETION HANDLERS
-    const handleDeleteItem = (index) => {
-        const key = manageMode === 'flashcards' ? 'cards' : (manageMode === 'quiz' ? 'quiz' : (manageMode === 'saq' ? 'saqs' : 'exams'));
-        const newItems = [...(deck[key] || [])];
-        newItems.splice(index, 1);
-        onUpdateDeck({ ...deck, [key]: newItems });
-    };
-
-    const handleDeleteAll = () => {
-        const key = manageMode === 'flashcards' ? 'cards' : (manageMode === 'quiz' ? 'quiz' : (manageMode === 'saq' ? 'saqs' : 'exams'));
-        if (confirm(`Delete ALL ${manageMode}? This cannot be undone.`)) {
-            onUpdateDeck({ ...deck, [key]: [] });
-            setManageMode(null);
-        }
-    };
-
-    const handleFileUpload = async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        if (file.size > 10 * 1024 * 1024) { return alert("File too large (>10MB)."); }
-
-        if (file.type.startsWith('image/')) {
-            const reader = new FileReader();
-            reader.onload = (e) => setAttachment({ type: 'image', data: e.target.result, file });
-            reader.readAsDataURL(file);
-        } else if (file.type === 'application/pdf') {
-            setAttachment({ type: 'pdf', name: file.name, file });
-        }
-    };
-
-    // Mode Toggle
-    const toggleStudyMode = (mode) => {
-        onUpdateDeck({ ...deck, studyMode: mode });
-    };
-    
-    // Quiz Mode Toggle
-    const toggleQuizMode = (mode) => {
-        onUpdateDeck({ ...deck, quizMode: mode });
-    }
-
-    const handleGenerate = async (type) => {
-        const hasText = inputs.notes.trim() || inputs.transcript.trim() || inputs.slides.trim();
-        const hasAttachment = !!attachment;
-        if (!hasText && !hasAttachment) return alert("Please add text or a file.");
-        
-        setIsGenerating(true);
-        setStatusMessage("Initializing...");
-        const currentInputs = { ...inputs };
-
-        try {
-            const combinedContext = `MODULE: ${deck.title}\nNOTES: ${currentInputs.notes}\nTRANSCRIPT: ${currentInputs.transcript}\nSLIDES TEXT: ${currentInputs.slides}`;
-            let systemInstruction = `Target audience: ${userProfile.age || 'University'} student`;
-            if (userProfile.degree) systemInstruction += ` studying ${userProfile.degree}.`;
-
-            let attachmentPayload = null;
-            if (attachment?.file) attachmentPayload = await fileToBase64(attachment.file);
-
-            const BATCH_SIZE = (type === 'flashcards') ? 20 : 10; 
-            const totalBatches = Math.ceil(count / BATCH_SIZE);
-            let accumulatedResults = [];
-
-            // Determine target array
-            const targetKey = type === 'flashcards' ? 'cards' : (type === 'exam' ? 'exams' : (type === 'saq' ? 'saqs' : 'quiz'));
-            const existingItems = deck[targetKey] || [];
-            const existingSample = existingItems.slice(-30).map(item => item.q.substring(0, 30)).join(" | ");
-
-            for (let i = 0; i < totalBatches; i++) {
-                setStatusMessage(`Generating batch ${i + 1} of ${totalBatches}...`);
-                if (i > 0) await sleep(1000);
-
-                const itemsRemaining = count - accumulatedResults.length;
-                const currentBatchCount = Math.min(BATCH_SIZE, itemsRemaining);
-                
-                const currentSessionSample = accumulatedResults.map(item => item.q.substring(0, 30)).join(" | ");
-                const exclusionList = `${existingSample} | ${currentSessionSample}`;
-                
-                const avoidInstruction = exclusionList.length > 5 ? ` CRITICAL: Do NOT generate questions similar to these: [${exclusionList.substring(0, 500)}...]` : "";
-
-                let prompt = "";
-                if (type === "flashcards") {
-                    prompt = `Generate ${currentBatchCount} flashcards (JSON: [{"q":..., "a":...}]).${avoidInstruction}`;
-                } else if (type === "exam") {
-                    prompt = `Generate ${currentBatchCount} HARD, scenario-based multiple choice questions for a FINAL EXAM. Focus on application of knowledge, critical thinking, and synthesis. Return JSON: [{"q":..., "options":..., "a":..., "exp":...}].${avoidInstruction}`;
-                } else if (type === "saq") {
-                    prompt = `Generate ${currentBatchCount} Short Answer Questions (SAQ) testing deep understanding. Assign a mark value (2-7) based on complexity. Provide a comprehensive model answer. Return JSON: [{"q": "Question text...", "model": "Ideal answer...", "marks": 5}].${avoidInstruction}`;
-                } else {
-                    prompt = `Generate ${currentBatchCount} multiple choice questions (JSON: [{"q":..., "options":..., "a":..., "exp":...}]).${avoidInstruction}`;
-                }
-
-                try {
-                    const batchResult = await generateContent(apiKey, prompt, combinedContext, systemInstruction, attachmentPayload, currentBatchCount);
-                    // Safe handling for result + data validation
-                    const safeResult = Array.isArray(batchResult) ? batchResult : (batchResult ? [batchResult] : []);
-                    const validatedResult = validateAndFixData(safeResult, type === 'exam' ? 'mcq' : type);
-                    
-                    accumulatedResults = [...accumulatedResults, ...validatedResult];
-                } catch (batchError) { 
-                    console.error(batchError); break; 
-                }
-            }
-            
-            setStatusMessage("Saving...");
-            const updatedDeck = { ...deck, ...currentInputs }; 
-            updatedDeck[targetKey] = [...(deck[targetKey] || []), ...accumulatedResults];
-            onUpdateDeck(updatedDeck);
-
-        } catch (error) { 
-            alert(error.message); 
-        } finally { setIsGenerating(false); setStatusMessage(""); }
-    };
-    
-    if (activeExamData) {
-         return <ExamRunner questions={activeExamData} timeLimit={examTimeLimit} onBack={() => setActiveExamData(null)} apiKey={apiKey} />;
-    }
-
-    return (
-        <div className="max-w-6xl mx-auto p-6">
-            <div className="mb-6"><input value={deck.title} onChange={(e) => onUpdateDeck({...deck, title: e.target.value})} className="text-3xl font-bold bg-transparent border-b-2 border-transparent hover:border-slate-200 focus:border-indigo-500 focus:outline-none w-full pb-2 text-slate-800" placeholder="Module Title"/></div>
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-                <div className="lg:col-span-8 bg-white rounded-xl shadow-sm border border-slate-200 h-[650px] flex flex-col overflow-hidden">
-                    <div className="flex border-b border-slate-200 bg-slate-50/50">
-                        {['notes', 'transcript', 'slides'].map(tab => (
-                            <button key={tab} onClick={() => setActiveTab(tab)} className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 capitalize transition-colors ${activeTab === tab ? 'border-indigo-500 text-indigo-600 bg-indigo-50/50' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
-                                {tab === 'notes' && <FileText size={16}/>}
-                                {tab === 'transcript' && <Mic size={16}/>}
-                                {tab === 'slides' && <Presentation size={16}/>}
-                                {tab}
-                                {inputs[tab].length > 0 && <span className={`ml-1 w-2 h-2 rounded-full ${activeTab === tab ? 'bg-indigo-400' : 'bg-slate-300'}`} />}
-                            </button>
-                        ))}
-                    </div>
-                    <div className="flex-1 relative">
-                        <textarea className="w-full h-full p-6 resize-none focus:outline-none focus:bg-slate-50/30 text-sm leading-relaxed font-mono text-slate-700" placeholder={`Paste your ${activeTab} content here...`} value={inputs[activeTab]} onChange={(e) => handleInputChange(activeTab, e.target.value)}></textarea>
-                        {attachment && (
-                            <div className="absolute bottom-4 right-4 w-32 h-32 bg-white p-2 shadow-lg rounded-lg border border-slate-200 group flex flex-col items-center justify-center text-center">
-                                {attachment.type === 'image' ? <img src={attachment.data} alt="Preview" className="w-full h-20 object-cover rounded mb-1"/> : <div className="w-full h-20 flex flex-col items-center justify-center bg-red-50 rounded mb-1 border border-red-100"><FileType size={32} className="text-red-500 mb-1"/><span className="text-[10px] font-bold text-red-700 uppercase">PDF</span></div>}
-                                <span className="text-[10px] text-slate-500 truncate w-full px-1">{attachment.type === 'pdf' ? attachment.name : 'Image'}</span>
-                                <button onClick={() => { setAttachment(null); fileInputRef.current.value = ""; }} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-md hover:scale-110 transition"><X size={12}/></button>
-                            </div>
-                        )}
-                    </div>
-                    
-                    {/* UPDATED CONTROL BAR */}
-                    <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row gap-4 items-center justify-between">
-                        <div className="flex gap-4 text-sm text-slate-600 items-center">
-                            <div className="relative">
-                                <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*,application/pdf" className="hidden" />
-                                <button onClick={() => fileInputRef.current?.click()} className={`p-2 rounded-lg border transition flex items-center gap-2 ${attachment ? 'bg-indigo-50 border-indigo-200 text-indigo-600' : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-100'}`} title="Upload Slide Image or PDF">
-                                    {attachment ? (attachment.type === 'pdf' ? <FileType size={18}/> : <ImageIcon size={18}/>) : <Plus size={18}/>} {attachment ? (attachment.type === 'pdf' ? "PDF" : "Image") : "File"}
-                                </button>
-                            </div>
-                            <div className="h-6 w-px bg-slate-300 mx-2 hidden sm:block"></div>
-                            <div className="flex items-center gap-2">
-                                <span className="font-medium text-slate-500">Count:</span>
-                                <div className="relative flex items-center">
-                                    <Hash size={14} className="absolute left-2.5 text-slate-400 pointer-events-none"/>
-                                    <input 
-                                        type="number" 
-                                        min="1" 
-                                        max="50" 
-                                        value={count} 
-                                        onChange={(e) => setCount(Number(e.target.value))} 
-                                        className="w-20 pl-8 pr-2 py-1.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none text-slate-700 font-medium"
-                                    />
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="flex gap-2 w-full sm:w-auto">
-                            <button onClick={() => handleGenerate('flashcards')} disabled={isGenerating} className="flex-1 sm:flex-none bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 shadow-sm text-sm">
-                                {isGenerating ? <RotateCw className="animate-spin" size={16}/> : <Sparkles size={16}/>} {isGenerating ? statusMessage : "Cards"}
-                            </button>
-                            <button onClick={() => handleGenerate('mcq')} disabled={isGenerating} className="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 shadow-sm text-sm">
-                                {isGenerating ? <RotateCw className="animate-spin" size={16}/> : <Brain size={16}/>} {isGenerating ? statusMessage : "Quiz"}
-                            </button>
-                            <button onClick={() => handleGenerate('saq')} disabled={isGenerating} className="flex-1 sm:flex-none bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 shadow-sm text-sm">
-                                {isGenerating ? <RotateCw className="animate-spin" size={16}/> : <PenTool size={16}/>} {isGenerating ? statusMessage : "SAQ"}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-                
-                {/* Stats block */}
-                <div className="lg:col-span-4 space-y-6">
-                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                        <h3 className="font-semibold text-slate-700 mb-4 flex items-center gap-2"><Brain size={18}/> Stats</h3>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-100 flex flex-col items-center justify-center text-center relative group">
-                                <button onClick={() => setManageMode('flashcards')} className="absolute top-2 right-2 text-indigo-300 hover:text-indigo-600 opacity-0 group-hover:opacity-100 transition p-1" title="Manage Flashcards"><Edit3 size={14}/></button>
-                                <div className="text-3xl font-bold text-indigo-600 mb-1">{deck.cards?.length || 0}</div>
-                                <div className="text-xs text-indigo-400 font-bold uppercase">Cards</div>
-                            </div>
-                            <div className="bg-emerald-50 p-4 rounded-lg border border-emerald-100 flex flex-col items-center justify-center text-center relative group">
-                                <button onClick={() => setManageMode('quiz')} className="absolute top-2 right-2 text-emerald-300 hover:text-emerald-600 opacity-0 group-hover:opacity-100 transition p-1" title="Manage Questions"><Edit3 size={14}/></button>
-                                <div className="text-3xl font-bold text-emerald-600 mb-1">{deck.quiz?.length || 0}</div>
-                                <div className="text-xs text-emerald-400 font-bold uppercase">Practice</div>
-                            </div>
-                            <div className="bg-purple-50 p-4 rounded-lg border border-purple-100 flex flex-col items-center justify-center text-center relative group">
-                                <button onClick={() => setManageMode('saq')} className="absolute top-2 right-2 text-purple-300 hover:text-purple-600 opacity-0 group-hover:opacity-100 transition p-1" title="Manage SAQs"><Edit3 size={14}/></button>
-                                <div className="text-3xl font-bold text-purple-600 mb-1">{deck.saqs?.length || 0}</div>
-                                <div className="text-xs text-purple-400 font-bold uppercase">SAQs</div>
-                            </div>
-                        </div>
-                    </div>
-                    <div className="space-y-3">
-                        <div className="bg-white p-4 rounded-xl border border-slate-200">
-                             <div className="flex justify-between items-center mb-3">
-                                 <span className="font-bold text-slate-700">Study Mode</span>
-                                 <div className="flex bg-slate-100 rounded-lg p-1">
-                                     <button onClick={() => toggleStudyMode('standard')} className={`px-3 py-1 rounded-md text-xs font-bold transition ${(!deck.studyMode || deck.studyMode === 'standard') ? 'bg-white shadow text-indigo-600' : 'text-slate-500'}`}>Standard</button>
-                                     <button onClick={() => toggleStudyMode('srs')} className={`px-3 py-1 rounded-md text-xs font-bold transition ${deck.studyMode === 'srs' ? 'bg-white shadow text-indigo-600' : 'text-slate-500'}`}>Smart</button>
-                                 </div>
-                             </div>
-                             <button onClick={() => onUpdateDeck({...deck, mode: 'flashcards'})} disabled={!deck.cards?.length} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                                 <BookOpen size={18}/> Study Flashcards
-                             </button>
-                        </div>
-
-                        <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-2">
-                            <button onClick={() => onUpdateDeck({...deck, mode: 'quiz', quizMode: 'practice'})} disabled={!deck.quiz?.length} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                                <Brain size={18}/> Practice Quiz
-                            </button>
-                            <button onClick={() => onUpdateDeck({...deck, mode: 'saq'})} disabled={!deck.saqs?.length} className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                                <PenTool size={18}/> Practice SAQs
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* Management Modal */}
-            {manageMode && (
-                <ManageModal 
-                    type={manageMode}
-                    items={manageMode === 'flashcards' ? (deck.cards || []) : (manageMode === 'quiz' ? (deck.quiz || []) : (manageMode === 'saq' ? (deck.saqs || []) : (deck.exams || [])))}
-                    onClose={() => setManageMode(null)}
-                    onDeleteItem={handleDeleteItem}
-                    onDeleteAll={handleDeleteAll}
-                />
-            )}
-        </div>
-    );
-};
-
-// ... FlashcardStudy, FolderDashboard (Updated) ...
-// (FolderDashboard is defined BEFORE ModuleDashboard in previous response, so here I will provide the updated FolderDashboard with LIVE GENERATION logic)
-
+// --- FOLDER DASHBOARD ---
 const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }) => {
-    // ... [Same imports/state] ...
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [syllabusText, setSyllabusText] = useState(folder.syllabus || "");
     const [isGlobalStudy, setIsGlobalStudy] = useState(false);
     const [globalStudyMode, setGlobalStudyMode] = useState('srs');
-    const [globalShuffle, setGlobalShuffle] = useState(true); // Default to shuffled
-    
-    // NEW: Live Exam States
+    const [globalShuffle, setGlobalShuffle] = useState(true);
     const [showExamSetup, setShowExamSetup] = useState(false);
     const [activeExamData, setActiveExamData] = useState(null); 
     const [examTimeLimit, setExamTimeLimit] = useState(0); 
-    const [isExamGenerating, setIsExamGenerating] = useState(false); // Loading state
-    const [generationProgress, setGenerationProgress] = useState(0); // NEW: Progress state
+    const [isExamGenerating, setIsExamGenerating] = useState(false);
 
     useEffect(() => { setSyllabusText(folder.syllabus || ""); }, [folder.id]);
     const handleSaveSyllabus = () => onUpdateFolder({ ...folder, syllabus: syllabusText }); 
-    const allModules = decks.filter(d => d.folderId === folder.id);
 
     const handleAnalyze = async () => {
-        if (!syllabusText.trim()) return alert("Syllabus is empty.");
+        if (!syllabusText.trim()) return alert("Please paste the Course Outline first.");
         setIsAnalyzing(true);
         try {
-            const moduleTitles = allModules.map(d => d.title).join(', ');
-            const prompt = `Analyze this syllabus against the existing modules: [${moduleTitles}]. Identify gaps or mismatches. Return JSON: { "analysis": "string", "suggestions": ["string", ...] }`;
-            const result = await generateContent(apiKey, prompt, syllabusText, "");
-            onUpdateFolder({ ...folder, analysis: result });
-        } catch (e) {
-            alert(e.message);
-        } finally {
-            setIsAnalyzing(false);
-        }
+            const allContent = decks.map(d => `MODULE: ${d.title}\nNOTES: ${d.notes || ''}\nSLIDES: ${d.slides || ''}\nTRANSCRIPT: ${d.transcript || ''}`).join("\n\n----------------\n\n");
+            if (!allContent.trim()) return alert("No content found in modules!");
+            const prompt = `Analyze 'STUDENT MATERIALS' against 'OFFICIAL SYLLABUS'. Return JSON: {"score": 0-100, "analysis": "summary", "missing": "missing topics"}`;
+            const context = `OFFICIAL SYLLABUS:\n${syllabusText}\n\nSTUDENT MATERIALS:\n${allContent}`;
+            const result = await generateContent(apiKey, prompt, context, "", null, 1);
+            onUpdateFolder({ ...folder, syllabus: syllabusText, coverage: result });
+        } catch (error) { 
+            alert(error.message); 
+        } finally { setIsAnalyzing(false); }
     };
+
+    const globalCards = decks.flatMap(d => (d.cards || []).map(c => ({...c, _deckId: d.id})));
 
     const handleGlobalUpdate = (updatedGlobalDeck) => {
-        const { cards, incorrectQuestions } = updatedGlobalDeck;
-        const updatedDecks = decks.map(deck => {
-            const relevantCards = cards.filter(c => c.originalDeckId === deck.id);
-            if (relevantCards.length > 0) {
-                const newCards = deck.cards.map(dc => relevantCards.find(rc => rc.id === dc.id) || dc);
-                return { ...deck, cards: newCards };
+        // Map updated cards back to their specific module decks
+        const cardsByDeck = {};
+        updatedGlobalDeck.cards.forEach(c => {
+            if (c._deckId) {
+                if (!cardsByDeck[c._deckId]) cardsByDeck[c._deckId] = [];
+                cardsByDeck[c._deckId].push(c);
             }
-            return deck;
         });
-        setDecks(updatedDecks);
-        onUpdateFolder({ ...folder, incorrectQuestions });
+
+        Object.keys(cardsByDeck).forEach(deckId => {
+            const originalDeck = decks.find(d => d.id === parseInt(deckId) || d.id === deckId);
+            if (originalDeck) {
+                onUpdateDeck({ ...originalDeck, cards: cardsByDeck[deckId] });
+            }
+        });
     };
 
-    // --- LIVE EXAM GENERATOR (FOLDER LEVEL) ---
     const handleStartLiveExam = async ({ moduleIds, numMCQs, numSAQs, timeLimit }) => {
-        setShowExamSetup(false);
         setIsExamGenerating(true);
-        setGenerationProgress(0); // Reset progress
-
         try {
-            // 1. Gather Context
-            setGenerationProgress(10);
-            const selectedDecks = allModules.filter(d => moduleIds.includes(d.id));
+            const selectedDecks = decks.filter(d => moduleIds.includes(d.id));
             const combinedContext = selectedDecks.map(d => `MODULE: ${d.title}\n${d.notes}\n${d.transcript}\n${d.slides}`).join("\n\n---\n\n");
             
-            // 2. Generate MCQs
-            setGenerationProgress(20);
             let mcqs = [];
             if(numMCQs > 0) {
-                 const promptMCQ = `Generate ${numMCQs} HARD, scenario-based multiple choice questions for a FINAL EXAM covering these modules. Focus on synthesis and application. JSON: [{"q":..., "options":..., "a":..., "exp":...}]`;
-                 setGenerationProgress(30); // Started generating MCQs
+                 const promptMCQ = `Generate ${numMCQs} HARD, scenario-based multiple choice questions for a FINAL EXAM. JSON: [{"q":..., "options":..., "a":..., "exp":...}]`;
                  const rawMCQ = await generateContent(apiKey, promptMCQ, combinedContext, "", null, numMCQs);
                  mcqs = validateAndFixData(Array.isArray(rawMCQ) ? rawMCQ : [rawMCQ], 'mcq');
-                 setGenerationProgress(60); // Finished generating MCQs
-            } else {
-                 setGenerationProgress(60); // Skip MCQ phase
             }
 
-            // 3. Generate SAQs
             let saqs = [];
             if(numSAQs > 0) {
-                 const promptSAQ = `Generate ${numSAQs} Short Answer Questions (SAQ) testing deep understanding of these modules. Assign marks (2-7). JSON: [{"q":..., "model":..., "marks":5}]`;
-                 setGenerationProgress(70); // Started generating SAQs
+                 const promptSAQ = `Generate ${numSAQs} Short Answer Questions (SAQ). Assign marks (2-7). JSON: [{"q":..., "model":..., "marks":5}]`;
                  const rawSAQ = await generateContent(apiKey, promptSAQ, combinedContext, "", null, numSAQs);
                  saqs = validateAndFixData(Array.isArray(rawSAQ) ? rawSAQ : [rawSAQ], 'saq');
-                 setGenerationProgress(90); // Finished generating SAQs
-            } else {
-                 setGenerationProgress(90); // Skip SAQ phase
             }
             
             const finalExam = [...mcqs, ...saqs];
             if (finalExam.length === 0) throw new Error("Failed to generate exam questions.");
 
             setExamTimeLimit(timeLimit);
-            setGenerationProgress(100);
-            await sleep(500); // Small delay to see 100%
             setActiveExamData(finalExam);
-
+            setShowExamSetup(false);
         } catch (e) {
             alert(e.message);
         } finally {
             setIsExamGenerating(false);
-            setGenerationProgress(0);
         }
     };
 
     if (isGlobalStudy) {
-        const allCards = allModules.flatMap(d => (d.cards || []).map(c => ({ ...c, originalDeckId: d.id, id: c.id || Math.random() })));
-        const globalDeck = {
-            id: 'global',
-            title: `Global Study: ${folder.name}`,
-            cards: globalShuffle ? [...allCards].sort(() => Math.random() - 0.5) : allCards,
-            incorrectQuestions: folder.incorrectQuestions || [],
-            studyMode: globalStudyMode,
-        };
-        return <FlashcardStudy deck={globalDeck} onUpdateDeck={handleGlobalUpdate} onBack={() => setIsGlobalStudy(false)} apiKey={apiKey} />;
+        let finalCards = globalCards;
+        if (globalShuffle) {
+            finalCards = [...globalCards].sort(() => Math.random() - 0.5);
+        }
+        const virtualDeck = { id: 'global', title: `${folder.name} (Global)`, studyMode: globalStudyMode, cards: finalCards };
+        return <FlashcardStudy cards={finalCards} deck={virtualDeck} apiKey={apiKey} onUpdateDeck={handleGlobalUpdate} onBack={() => setIsGlobalStudy(false)} />;
     }
 
     if (activeExamData) {
@@ -1263,107 +956,84 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }
     if (isExamGenerating) {
         return (
             <div className="h-full flex flex-col items-center justify-center">
-                <div className="w-64 h-2 bg-slate-200 rounded-full mb-4 overflow-hidden relative">
-                    <div 
-                        className="h-full bg-indigo-600 transition-all duration-500 ease-out" 
-                        style={{ width: `${generationProgress}%` }}
-                    ></div>
-                </div>
-                <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                    {generationProgress < 100 ? <RotateCw className="animate-spin text-indigo-600" size={24} /> : <CheckCircle className="text-emerald-500" size={24}/>}
-                    {generationProgress < 100 ? "Building Exam..." : "Ready!"}
-                </h3>
-                <p className="text-slate-500 text-sm mt-2">
-                    {generationProgress < 20 && "Analyzing modules..."}
-                    {generationProgress >= 20 && generationProgress < 60 && "Drafting multiple choice..."}
-                    {generationProgress >= 60 && generationProgress < 90 && "Composing short answer questions..."}
-                    {generationProgress >= 90 && "Finalizing paper..."}
-                </p>
+                <RotateCw className="animate-spin text-indigo-600 mb-4" size={48} />
+                <h3 className="text-xl font-bold text-slate-800">Generating Live Exam...</h3>
+                <p className="text-slate-500"> analyzing {decks.length} modules to build your paper.</p>
             </div>
         )
     }
 
-    const totalCards = allModules.reduce((sum, d) => sum + (d.cards?.length || 0), 0);
-    const totalQuestions = allModules.reduce((sum, d) => sum + (d.quiz?.length || 0), 0);
-    const totalSaqs = allModules.reduce((sum, d) => sum + (d.saqs?.length || 0), 0); 
+    const totalCards = decks.reduce((sum, d) => sum + (d.cards?.length || 0), 0);
+    const totalQuestions = decks.reduce((sum, d) => sum + (d.quiz?.length || 0), 0);
+    const totalSaqs = decks.reduce((sum, d) => sum + (d.saqs?.length || 0), 0); 
+    const totalExams = decks.reduce((sum, d) => sum + (d.exams?.length || 0), 0);
 
     return (
         <div className="max-w-6xl mx-auto p-6 h-full flex flex-col">
-            {/* ... Header and Analysis Panel (Same as before) ... */}
-            
+            <div className="mb-8"><h2 className="text-3xl font-bold text-slate-800 flex items-center gap-3"><Folder size={32} className="text-indigo-500"/> {folder.name} <span className="text-slate-400 text-lg font-normal">/ Course Overview</span></h2></div>
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 flex-1 min-h-0">
                 <div className="lg:col-span-8 flex flex-col gap-4 h-full">
-                     {/* ... Syllabus Panel ... */}
                      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex-1 flex flex-col">
                         <div className="flex items-center justify-between mb-4">
                             <h3 className="font-bold text-slate-700 flex items-center gap-2"><BookOpenText size={20} className="text-emerald-500"/> Course Syllabus</h3>
                             <button onClick={handleSaveSyllabus} className="text-xs text-indigo-600 font-medium hover:underline">Save Text</button>
                         </div>
                         <textarea className="flex-1 w-full p-4 bg-slate-50 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-sm font-mono leading-relaxed" placeholder="Paste course outline here..." value={syllabusText} onChange={(e) => setSyllabusText(e.target.value)} onBlur={handleSaveSyllabus}></textarea>
-                        <div className="mt-4">
-                            <button onClick={handleAnalyze} disabled={isAnalyzing} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70">
-                                {isAnalyzing ? <RotateCw className="animate-spin"/> : <PieChart/>} {isAnalyzing ? "Auditing..." : "Analyze Coverage"}
-                            </button>
-                        </div>
+                        <div className="mt-4"><button onClick={handleAnalyze} disabled={isAnalyzing} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70">{isAnalyzing ? <RotateCw className="animate-spin"/> : <PieChart/>} {isAnalyzing ? "Auditing..." : "Analyze Coverage"}</button></div>
                     </div>
                 </div>
                 <div className="lg:col-span-4 space-y-6 overflow-y-auto">
-                    {/* ... Audit & Totals ... */}
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                        <h3 className="font-semibold text-slate-700 mb-4 flex items-center gap-2"><CheckCircle size={18} className="text-indigo-500"/> Content Audit</h3>
+                        {folder.coverage ? (
+                            <div className="space-y-4 animate-fade-in">
+                                <div className="flex items-end gap-2"><span className={`text-4xl font-bold ${folder.coverage.score >= 80 ? 'text-emerald-600' : folder.coverage.score >= 50 ? 'text-yellow-600' : 'text-red-600'}`}>{folder.coverage.score}%</span><span className="text-sm text-slate-500 mb-1">Coverage Score</span></div>
+                                <div className="w-full bg-slate-100 rounded-full h-2"><div className="bg-emerald-500 h-2 rounded-full transition-all duration-1000" style={{ width: `${folder.coverage.score}%` }}></div></div>
+                                <div className="p-3 bg-slate-50 rounded-lg text-sm text-slate-700 border border-slate-100"><FormattedText text={folder.coverage.analysis}/></div>
+                                {folder.coverage.missing && <div className="p-3 bg-red-50 rounded-lg text-sm text-red-700 border border-red-100"><div className="font-bold flex items-center gap-2 mb-1"><AlertCircle size={14}/> Missing:</div><FormattedText text={folder.coverage.missing}/></div>}
+                            </div>
+                        ) : <div className="text-center text-slate-400 py-8 text-sm">Run analysis to check coverage.</div>}
+                    </div>
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                         <h3 className="font-semibold text-slate-700 mb-4">Course Totals</h3>
                         <div className="grid grid-cols-2 gap-4">
-                            <div className="bg-slate-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-slate-800">{allModules.length}</div><div className="text-xs text-slate-500 uppercase">Modules</div></div>
+                            <div className="bg-slate-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-slate-800">{decks.length}</div><div className="text-xs text-slate-500 uppercase">Modules</div></div>
                             <div className="bg-indigo-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-indigo-600">{totalCards}</div><div className="text-xs text-indigo-400 uppercase">Cards</div></div>
                             <div className="bg-emerald-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-emerald-600">{totalQuestions}</div><div className="text-xs text-emerald-400 uppercase">Practice</div></div>
-                            <div className="bg-purple-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-purple-600">{totalSaqs}</div><div className="text-xs text-purple-400 uppercase">SAQs</div></div>                            <div className="bg-red-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-red-600">{folder.incorrectQuestions?.length || 0}</div><div className="text-xs text-red-400 uppercase">Incorrect</div></div>
+                            <div className="bg-purple-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-purple-600">{totalSaqs}</div><div className="text-xs text-purple-400 uppercase">SAQs</div></div>
                         </div>
                     </div>
-
                     <div className="space-y-3">
-                         {/* Global Study Card (Same as before) */}
                          <div className="bg-gradient-to-br from-indigo-600 to-violet-600 p-6 rounded-xl shadow-md text-white">
                             <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><Layers/> Global Flashcards</h3>
-                            {/* ... (Standard/SRS buttons) ... */}
                             <div className="flex items-center gap-3 mb-4 bg-white/10 p-1 rounded-lg">
                                 <button onClick={() => setGlobalStudyMode('standard')} className={`flex-1 py-1.5 px-3 rounded-md text-sm font-bold transition ${globalStudyMode === 'standard' ? 'bg-white text-indigo-600 shadow' : 'text-indigo-100 hover:bg-white/10'}`}>Standard</button>
                                 <button onClick={() => setGlobalStudyMode('srs')} className={`flex-1 py-1.5 px-3 rounded-md text-sm font-bold transition ${globalStudyMode === 'srs' ? 'bg-white text-indigo-600 shadow' : 'text-indigo-100 hover:bg-white/10'}`}>Smart (SRS)</button>
                             </div>
-                            {/* ... Shuffle toggle ... */}
-                            <div className="flex justify-between items-center mb-4">
-                                <div className="flex items-center gap-2 cursor-pointer" onClick={() => setGlobalShuffle(!globalShuffle)}>
-                                    <div className={`w-5 h-5 rounded flex items-center justify-center border transition ${globalShuffle ? 'bg-white border-white text-indigo-600' : 'border-indigo-200 text-transparent'}`}><Check size={14} strokeWidth={3} /></div>
-                                    <span className="text-sm font-medium text-indigo-50">Shuffle Cards</span>
-                                </div>
-                                <button onClick={() => onUpdateFolder({ ...folder, incorrectQuestions: [] })} className="text-xs text-red-200 hover:text-red-50 font-medium hover:underline">Clear Incorrect</button>
+                            <div className="flex items-center gap-2 mb-4 cursor-pointer" onClick={() => setGlobalShuffle(!globalShuffle)}>
+                                <div className={`w-5 h-5 rounded flex items-center justify-center border transition ${globalShuffle ? 'bg-white border-white text-indigo-600' : 'border-indigo-200 text-transparent'}`}><Check size={14} strokeWidth={4} /></div>
+                                <span className="text-sm font-medium text-indigo-50">Shuffle Cards</span>
                             </div>
                             <button onClick={() => setIsGlobalStudy(true)} disabled={totalCards === 0} className="w-full bg-white text-indigo-600 font-bold py-3 rounded-lg hover:bg-indigo-50 transition disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"><Zap size={18}/> Start Studying</button>
                         </div>
-
-                        {/* MOCK EXAM CARD (Triggers Live Generation) */}
                         <div className="bg-gradient-to-br from-red-500 to-rose-600 p-6 rounded-xl shadow-md text-white">
                             <h3 className="font-bold text-lg mb-2 flex items-center gap-2"><FileQuestion/> Mock Exam</h3>
-                            <p className="text-red-100 text-sm mb-4">Generate a fresh exam paper from your {allModules.length} modules.</p>
+                            <p className="text-red-100 text-sm mb-4">Generate a fresh exam paper from your modules.</p>
                             <button onClick={() => setShowExamSetup(true)} disabled={decks.length === 0} className="w-full bg-white text-red-600 font-bold py-3 rounded-lg hover:bg-red-50 transition disabled:opacity-70 flex items-center justify-center gap-2"><Timer size={18}/> Build Exam</button>
                         </div>
                     </div>
                 </div>
             </div>
-            
-            {showExamSetup && (
-                <ExamSetupModal 
-                    modules={allModules} 
-                    onClose={() => setShowExamSetup(false)} 
-                    onStartExam={handleStartLiveExam} 
-                />
-            )}
+            {showExamSetup && <ExamSetupModal modules={decks} onClose={() => setShowExamSetup(false)} onStartExam={handleStartLiveExam} />}
         </div>
     );
 };
 
+// --- APP MAIN ---
 export default function App() {
     const [folders, setFolders] = useState(() => JSON.parse(localStorage.getItem('studyGenieFolders')) || [{ id: 1, name: 'General' }]);
     const [decks, setDecks] = useState(() => {
-        const d = JSON.parse(localStorage.getItem('studyGenieData')) || [{ id: 101, folderId: 1, title: 'Example Module', incorrectQuestions: [] }];
+        const d = JSON.parse(localStorage.getItem('studyGenieData')) || [{ id: 101, folderId: 1, title: 'Example Module' }];
         return d.map(x => x.folderId ? x : { ...x, folderId: 1 });
     });
     const [userProfile, setUserProfile] = useState(() => JSON.parse(localStorage.getItem('studyGenieProfile')) || { age: '', degree: '' });
@@ -1371,8 +1041,6 @@ export default function App() {
     const [viewMode, setViewMode] = useState('deck'); 
     const [activeId, setActiveId] = useState(decks[0]?.id || null);
     const [showSettings, setShowSettings] = useState(false);
-    
-    // Name Modal State
     const [nameModal, setNameModal] = useState({ isOpen: false, type: '', folder: null, value: '' });
 
     useEffect(() => {
@@ -1387,23 +1055,18 @@ export default function App() {
 
     const updateDeck = (d) => setDecks(decks.map(x => x.id === d.id ? d : x));
     const updateFolder = (f) => setFolders(folders.map(x => x.id === f.id ? f : x));
-    
-    // New Folder / Rename Logic
-    const openAddFolder = () => setNameModal({ isOpen: true, type: 'create', folder: null, value: '' });
-    const openRenameFolder = (folder) => setNameModal({ isOpen: true, type: 'rename', folder: folder, value: folder.name });
-
-    const handleSaveName = (name) => {
-        if (nameModal.type === 'create') {
-            setFolders([...folders, { id: Date.now(), name }]);
-        } else {
-            setFolders(folders.map(f => f.id === nameModal.folder.id ? { ...f, name } : f));
-        }
-        setNameModal({ isOpen: false, type: '', folder: null, value: '' });
-    };
-
     const deleteFolder = (id) => { if(confirm("Delete folder?")) { setDecks(decks.filter(d => d.folderId !== id)); setFolders(folders.filter(f => f.id !== id)); setActiveId(null); }};
     const addDeck = (fid) => { const nid = Date.now(); setDecks([...decks, { id: nid, folderId: fid, title: 'New Module', mode: 'dashboard' }]); setViewMode('deck'); setActiveId(nid); };
     const deleteDeck = (id) => { if(confirm("Delete module?")) { const rem = decks.filter(d => d.id !== id); setDecks(rem); if(activeId === id) setActiveId(rem[0]?.id || null); }};
+    
+    const openRenameFolder = (folder) => setNameModal({ isOpen: true, type: 'rename', folder: folder, value: folder.name });
+    const handleSaveName = (name) => {
+        if (nameModal.type === 'create') setFolders([...folders, { id: Date.now(), name }]);
+        else setFolders(folders.map(f => f.id === nameModal.folder.id ? { ...f, name } : f));
+        setNameModal({ isOpen: false, type: '', folder: null, value: '' });
+    };
+    
+    const openAddFolder = () => setNameModal({ isOpen: true, type: 'create', folder: null, value: '' });
 
     return (
         <div className="flex h-screen bg-[#f8fafc] font-sans text-slate-900">
@@ -1421,26 +1084,15 @@ export default function App() {
                 {viewMode === 'deck' && activeDeck && (
                     <>
                         {activeDeck.mode === 'dashboard' && <ModuleDashboard deck={activeDeck} onUpdateDeck={updateDeck} apiKey={apiKey} userProfile={userProfile} />}
-                        {activeDeck.mode === 'flashcards' && <FlashcardStudy deck={activeDeck} onUpdateDeck={updateDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} apiKey={apiKey} />}
-                        {/* Using 'quiz' mode for practice, 'exam' mode passes special prop */}
+                        {activeDeck.mode === 'flashcards' && <FlashcardStudy cards={activeDeck.cards || []} deck={activeDeck} onUpdateDeck={updateDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} apiKey={apiKey} />}
                         {activeDeck.mode === 'quiz' && <ExamRunner questions={activeDeck.quiz || []} deck={activeDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} apiKey={apiKey} />}
                         {activeDeck.mode === 'exam' && <ExamRunner questions={activeDeck.exams || []} deck={activeDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} apiKey={apiKey} />}
                         {activeDeck.mode === 'saq' && <SAQMode questions={activeDeck.saqs || []} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} apiKey={apiKey} />}
                     </>
                 )}
-
                 {!activeDeck && !activeFolder && <div className="flex h-full items-center justify-center text-slate-400"><BookOpen size={48} className="opacity-50"/></div>}
             </main>
-
-            {/* Name Input Modal */}
-            <NameModal 
-                isOpen={nameModal.isOpen}
-                type={nameModal.type}
-                initialValue={nameModal.value}
-                onClose={() => setNameModal({ ...nameModal, isOpen: false })}
-                onSave={handleSaveName}
-            />
-
+            <NameModal isOpen={nameModal.isOpen} type={nameModal.type} initialValue={nameModal.value} onClose={() => setNameModal({ ...nameModal, isOpen: false })} onSave={handleSaveName} />
             {showSettings && (
                 <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
                     <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md">
