@@ -250,8 +250,56 @@ const generateContent = async (apiKey, prompt, context, systemInstruction, attac
 };
 
 // --- AUTH COMPONENT ---
-const AuthPage = () => {
-    return <div/>;
+const AuthPage = ({ onAuthSuccess }) => {
+    const [isLogin, setIsLogin] = useState(true);
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [error, setError] = useState('');
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setError('');
+        try {
+            let userCredential;
+            if (isLogin) {
+                userCredential = await signInWithEmailAndPassword(auth, email, password);
+            } else {
+                userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                // Create a user document in Firestore upon signup
+                const userDocRef = doc(db, "users", userCredential.user.uid);
+                await setDoc(userDocRef, {
+                    folders: [{ id: 1, name: 'General' }],
+                    decks: [{ id: 101, folderId: 1, title: 'Example Module', content: 'Welcome! Add notes here.' }],
+                    profile: { age: '', degree: '' },
+                    createdAt: serverTimestamp()
+                });
+            }
+            onAuthSuccess(userCredential.user);
+        } catch (err) {
+            setError(err.message.replace('Firebase: ', ''));
+        }
+    };
+
+    return (
+        <div className="w-full h-screen flex items-center justify-center bg-slate-100">
+            <div className="w-full max-w-sm p-8 bg-white rounded-2xl shadow-xl">
+                <h2 className="text-2xl font-bold text-center text-slate-800 mb-2">Study Genie</h2>
+                <p className="text-center text-slate-500 mb-6">{isLogin ? 'Welcome back!' : 'Create your account'}</p>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} className="w-full p-3 border rounded-lg" required />
+                    <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} className="w-full p-3 border rounded-lg" required />
+                    {error && <p className="text-red-500 text-sm text-center">{error}</p>}
+                    <button type="submit" className="w-full p-3 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700">{isLogin ? 'Log In' : 'Sign Up'}</button>
+                </form>
+                <p className="text-center text-sm text-slate-500 mt-6">
+                    {isLogin ? "Don't have an account?" : "Already have an account?"}
+                    <button onClick={() => { setIsLogin(!isLogin); setError(''); }} className="font-bold text-indigo-600 hover:underline ml-1">
+                        {isLogin ? 'Sign Up' : 'Log In'}
+                    </button>
+                </p>
+            </div>
+        </div>
+    );
 };
 
 // --- MODALS ---
@@ -719,7 +767,7 @@ const FlashcardStudy = ({ cards, onBack, apiKey, onUpdateDeck, deck }) => {
 };
 
 // --- SIDEBAR COMPONENT ---
-const Sidebar = ({ folders, decks, activeId, viewMode, onSelectDeck, onSelectFolder, onAddFolder, onDeleteFolder, onRenameFolder, onAddDeck, onDeleteDeck, onSettings }) => {
+const Sidebar = ({ user, folders, decks, activeId, viewMode, onSelectDeck, onSelectFolder, onAddFolder, onDeleteFolder, onRenameFolder, onAddDeck, onDeleteDeck, onSettings }) => {
     const [expandedFolders, setExpandedFolders] = useState({});
     const toggleFolder = (folderId) => setExpandedFolders(prev => ({ ...prev, [folderId]: !prev[folderId] }));
     useEffect(() => {
@@ -734,7 +782,7 @@ const Sidebar = ({ folders, decks, activeId, viewMode, onSelectDeck, onSelectFol
     return (
         <div className="w-full md:w-72 bg-slate-900 text-white flex flex-col h-screen fixed md:relative z-20 shadow-xl border-r border-slate-800">
             <div className="p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
-                <h1 className="font-bold text-xl flex items-center gap-2"><GraduationCap className="text-indigo-400" /> Graham Kong</h1>
+                <h1 className="font-bold text-lg flex items-center gap-2 truncate"><GraduationCap className="text-indigo-400 flex-shrink-0" /> <span className="truncate">{user?.email || 'Guest'}</span></h1>
                 <button onClick={onSettings} className="hover:text-indigo-400 transition"><Settings size={18}/></button>
             </div>
             <div className="flex-1 overflow-y-auto custom-scroll p-4 space-y-6">
@@ -1148,48 +1196,104 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, apiKey }
 
 // --- APP MAIN ---
 export default function App() {
-    const [folders, setFolders] = useState(() => JSON.parse(localStorage.getItem('studyGenieFolders')) || [{ id: 1, name: 'General' }]);
-    const [decks, setDecks] = useState(() => {
-        const d = JSON.parse(localStorage.getItem('studyGenieData')) || [{ id: 101, folderId: 1, title: 'Example Module' }];
-        return d.map(x => x.folderId ? x : { ...x, folderId: 1 });
-    });
-    const [userProfile, setUserProfile] = useState(() => JSON.parse(localStorage.getItem('studyGenieProfile')) || { age: '', degree: '' });
-    const [apiKey, setApiKey] = useState(() => localStorage.getItem('geminiKey') || '');
+    const [user, setUser] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [folders, setFolders] = useState([]);
+    const [decks, setDecks] = useState([]);
+    const [userProfile, setUserProfile] = useState({ age: '', degree: '' });
+    const [apiKey, setApiKey] = useState(() => localStorage.getItem('geminiKey') || ''); // Keep API key in localStorage for convenience
     const [viewMode, setViewMode] = useState('deck'); 
-    const [activeId, setActiveId] = useState(decks[0]?.id || null);
+    const [activeId, setActiveId] = useState(null);
     const [showSettings, setShowSettings] = useState(false);
     const [nameModal, setNameModal] = useState({ isOpen: false, type: '', folder: null, value: '' });
 
     useEffect(() => {
-        localStorage.setItem('studyGenieFolders', JSON.stringify(folders));
-        localStorage.setItem('studyGenieData', JSON.stringify(decks));
-        localStorage.setItem('studyGenieProfile', JSON.stringify(userProfile));
+        const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+            setUser(currentUser);
+            setLoading(false);
+        });
+        return () => unsubscribe();
+    }, []);
+
+    useEffect(() => {
+        if (!user) {
+            setFolders([]);
+            setDecks([]);
+            setUserProfile({ age: '', degree: '' });
+            setActiveId(null);
+            return;
+        }
+
+        const userDocRef = doc(db, "users", user.uid);
+        const unsubscribe = onSnapshot(userDocRef, (docSnap) => {
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                const fetchedFolders = data.folders || [{ id: 1, name: 'General' }];
+                const fetchedDecks = data.decks || [{ id: 101, folderId: 1, title: 'Example Module' }];
+                setFolders(fetchedFolders);
+                setDecks(fetchedDecks);
+                setUserProfile(data.profile || { age: '', degree: '' });
+                
+                if (!activeId && fetchedDecks.length > 0) {
+                    setActiveId(fetchedDecks[0].id);
+                    setViewMode('deck');
+                }
+            } else {
+                // This case is handled on signup, but as a fallback:
+                console.log("No user document found, creating one.");
+                setDoc(userDocRef, { folders: [], decks: [], profile: { age: '', degree: '' } });
+            }
+        });
+
+        return () => unsubscribe();
+    }, [user, activeId]);
+
+    const updateFirestore = async (newData) => {
+        if (!user) return;
+        const userDocRef = doc(db, "users", user.uid);
+        await updateDoc(userDocRef, newData);
+    };
+
+    useEffect(() => {
         localStorage.setItem('geminiKey', apiKey);
-    }, [folders, decks, userProfile, apiKey]);
+    }, [apiKey]);
 
     const activeDeck = viewMode === 'deck' ? decks.find(d => d.id === activeId) : null;
     const activeFolder = viewMode === 'folder' ? folders.find(f => f.id === activeId) : null;
 
-    const updateDeck = (d) => setDecks(decks.map(x => x.id === d.id ? d : x));
-    const updateFolder = (f) => setFolders(folders.map(x => x.id === f.id ? f : x));
-    const deleteFolder = (id) => { if(confirm("Delete folder?")) { setDecks(decks.filter(d => d.folderId !== id)); setFolders(folders.filter(f => f.id !== id)); setActiveId(null); }};
-    const addDeck = (fid) => { const nid = Date.now(); setDecks([...decks, { id: nid, folderId: fid, title: 'New Module', mode: 'dashboard' }]); setViewMode('deck'); setActiveId(nid); };
-    const deleteDeck = (id) => { if(confirm("Delete module?")) { const rem = decks.filter(d => d.id !== id); setDecks(rem); if(activeId === id) setActiveId(rem[0]?.id || null); }};
+    const updateDeck = (d) => updateFirestore({ decks: decks.map(x => x.id === d.id ? d : x) });
+    const updateFolder = (f) => updateFirestore({ folders: folders.map(x => x.id === f.id ? f : x) });
+    const deleteFolder = (id) => { if(confirm("Delete folder?")) { const newDecks = decks.filter(d => d.folderId !== id); const newFolders = folders.filter(f => f.id !== id); updateFirestore({ decks: newDecks, folders: newFolders }); setActiveId(null); }};
+    const addDeck = (fid) => { const nid = Date.now(); updateFirestore({ decks: [...decks, { id: nid, folderId: fid, title: 'New Module', mode: 'dashboard' }] }); setViewMode('deck'); setActiveId(nid); };
+    const deleteDeck = (id) => { if(confirm("Delete module?")) { const rem = decks.filter(d => d.id !== id); updateFirestore({ decks: rem }); if(activeId === id) setActiveId(rem[0]?.id || null); }};
     
     const openRenameFolder = (folder) => setNameModal({ isOpen: true, type: 'rename', folder: folder, value: folder.name });
     const handleSaveName = (name) => {
-        if (nameModal.type === 'create') setFolders([...folders, { id: Date.now(), name }]);
-        else setFolders(folders.map(f => f.id === nameModal.folder.id ? { ...f, name } : f));
+        if (nameModal.type === 'create') updateFirestore({ folders: [...folders, { id: Date.now(), name }] });
+        else updateFirestore({ folders: folders.map(f => f.id === nameModal.folder.id ? { ...f, name } : f) });
         setNameModal({ isOpen: false, type: '', folder: null, value: '' });
     };
     
     const openAddFolder = () => setNameModal({ isOpen: true, type: 'create', folder: null, value: '' });
 
+    const handleLogout = async () => {
+        await signOut(auth);
+        setShowSettings(false);
+    };
+
+    if (loading) {
+        return <div className="w-full h-screen flex items-center justify-center"><RotateCw className="animate-spin text-indigo-600" size={48} /></div>;
+    }
+
+    if (!user) {
+        return <AuthPage onAuthSuccess={(authedUser) => setUser(authedUser)} />;
+    }
+
     return (
         <div className="flex h-screen bg-[#f8fafc] font-sans text-slate-900">
             <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
             <Sidebar 
-                folders={folders} decks={decks} activeId={activeId} viewMode={viewMode}
+                user={user} folders={folders} decks={decks} activeId={activeId} viewMode={viewMode}
                 onSelectDeck={(id) => { setViewMode('deck'); setActiveId(id); if(decks.find(d=>d.id===id)) updateDeck({...decks.find(d=>d.id===id), mode: 'dashboard'}); }}
                 onSelectFolder={(id) => { setViewMode('folder'); setActiveId(id); }}
                 onAddFolder={openAddFolder} onDeleteFolder={deleteFolder} onRenameFolder={openRenameFolder} 
@@ -1224,16 +1328,21 @@ export default function App() {
             {showSettings && (
                 <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
                     <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md">
-                        <div className="flex justify-between items-center mb-6"><h3 className="font-bold text-lg">Settings</h3><button onClick={() => setShowSettings(false)}><XCircle/></button></div>
+                        <div className="flex justify-between items-center mb-6"><h3 className="font-bold text-lg">Settings</h3><button onClick={() => setShowSettings(false)}><X/></button></div>
                         <div className="space-y-4">
-                            <div><label className="text-sm font-bold">API Key</label><input type="password" value={apiKey} onChange={e=>setApiKey(e.target.value)} className="w-full p-2 border rounded"/></div>
+                            <div><label className="text-sm font-bold text-slate-600">Gemini API Key</label><input type="password" value={apiKey} onChange={e=>setApiKey(e.target.value)} className="w-full p-2 border rounded-lg mt-1"/></div>
                             <div className="pt-4 border-t"><h4 className="font-bold mb-2">Profile</h4>
                                 <div className="grid grid-cols-2 gap-2">
-                                    <input placeholder="Age" type="number" value={userProfile.age} onChange={e=>setUserProfile({...userProfile, age: e.target.value})} className="p-2 border rounded"/>
-                                    <input placeholder="Degree" value={userProfile.degree} onChange={e=>setUserProfile({...userProfile, degree: e.target.value})} className="p-2 border rounded"/>
+                                    <input placeholder="Age" type="number" value={userProfile.age} onChange={e=>setUserProfile({...userProfile, age: e.target.value})} className="p-2 border rounded-lg"/>
+                                    <input placeholder="Degree" value={userProfile.degree} onChange={e=>setUserProfile({...userProfile, degree: e.target.value})} className="p-2 border rounded-lg"/>
                                 </div>
                             </div>
-                            <button onClick={() => setShowSettings(false)} className="w-full bg-indigo-600 text-white font-bold py-2 rounded">Save</button>
+                            <div className="pt-4 border-t flex flex-col gap-2">
+                                <button onClick={() => { updateFirestore({ profile: userProfile }); setShowSettings(false); }} className="w-full bg-indigo-600 text-white font-bold py-2 rounded-lg">Save Settings</button>
+                                <button onClick={handleLogout} className="w-full bg-red-500 text-white font-bold py-2 rounded-lg flex items-center justify-center gap-2">
+                                    <LogOut size={16}/> Logout
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
