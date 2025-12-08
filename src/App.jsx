@@ -1017,11 +1017,14 @@ const ModuleDashboard = ({ deck, onUpdateDeck, apiKey, userProfile }) => {
                                  <BookOpen size={18}/> Study Flashcards
                              </button>
                         </div>
+                        <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-2">
+                            <button onClick={() => onUpdateDeck({...deck, mode: 'quiz', quizMode: 'practice'})} disabled={!deck.quiz?.length} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition disabled:opacity-50 disabled:cursor-not-allowed"><Brain size={18}/> Practice Quiz</button>
+                            <button onClick={() => onUpdateDeck({...deck, mode: 'saq'})} disabled={!deck.saqs?.length} className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition disabled:opacity-50 disabled:cursor-not-allowed"><PenTool size={18}/> Practice SAQs</button>
+                        </div>
                     </div>
                 </div>
             </div>
             {manageMode && <ManageModal type={manageMode} items={manageMode === 'flashcards' ? (deck.cards || []) : (manageMode === 'quiz' ? (deck.quiz || []) : (manageMode === 'saq' ? (deck.saqs || []) : (deck.exams || [])))} onClose={() => setManageMode(null)} onDeleteItem={handleDeleteItem} onDeleteAll={handleDeleteAll} />}
-            {showExamSetup && <ExamSetupModal modules={[deck]} onClose={() => setShowExamSetup(false)} onStartExam={handleStartLiveExam} />}
         </div>
     );
 };
