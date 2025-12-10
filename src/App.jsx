@@ -1429,12 +1429,12 @@ export default function App() {
         setShowUpgradeModal(false);
         const newSubscription = {
             tier: 'pro',
-            credits: 500, // Boosted credits
+            credits: 3000, // Boosted credits
             subscriptionId: 'grum#kong', // The requested unique ID
             lastUpdated: serverTimestamp()
         };
         await updateFirestore({ subscription: newSubscription });
-        alert("Upgrade successful! Welcome to KonDeck Pro. Your credits have been boosted to 500/month.");
+        alert("Upgrade successful! Welcome to KonDeck Pro. Your credits have been boosted to 3000/month.");
     };
 
     const handleLogout = async () => {
