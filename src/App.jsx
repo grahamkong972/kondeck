@@ -1357,7 +1357,7 @@ export default function App() {
         });
 
         return () => unsubscribe();
-    }, [user, activeId]);
+    }, [user]); // activeId intentionally excluded - only initialize once
 
     const updateFirestore = async (newData) => {
         if (!user) return;
