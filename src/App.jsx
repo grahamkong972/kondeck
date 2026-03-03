@@ -455,21 +455,22 @@ const ExamSetupModal = ({ modules, onClose, onStartExam }) => {
 // --- NEW MODAL: UPGRADE MODAL ---
 
 // --- EXAM RUNNER ---
-const ExamRunner = ({ questions, timeLimit, onBack, userProfile }) => {
+const ExamRunner = ({ questions, timeLimit, onBack, userProfile, practice = false }) => {
     const [answers, setAnswers] = useState({});
     const [saqFeedback, setSaqFeedback] = useState({});
     const [submitted, setSubmitted] = useState(false);
-    const [timeLeft, setTimeLeft] = useState(timeLimit ? timeLimit * 60 : 600); 
+    const [timeLeft, setTimeLeft] = useState(timeLimit ? timeLimit * 60 : 600);
     const [gradingLoading, setGradingLoading] = useState({});
 
     useEffect(() => {
+        if (practice) return;
         if (!submitted && timeLeft > 0) {
             const timer = setInterval(() => setTimeLeft(p => p - 1), 1000);
             return () => clearInterval(timer);
         } else if (timeLeft === 0 && !submitted) {
             setSubmitted(true);
         }
-    }, [submitted, timeLeft]);
+    }, [submitted, timeLeft, practice]);
 
     const formatTime = (s) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
 
@@ -499,11 +500,11 @@ const ExamRunner = ({ questions, timeLimit, onBack, userProfile }) => {
             <div className="flex justify-between items-center mb-8 sticky top-0 bg-[#f8fafc] py-4 z-10 border-b">
                 <button onClick={onBack} className="flex gap-2 text-slate-500 hover:text-indigo-600 font-medium"><ChevronLeft/> Exit</button>
                 {!submitted ? (
-                    <div className={`font-mono font-bold text-xl flex items-center gap-2 ${timeLeft < 300 ? 'text-red-600 animate-pulse' : 'text-slate-700'}`}>
+                    !practice && <div className={`font-mono font-bold text-xl flex items-center gap-2 ${timeLeft < 300 ? 'text-red-600 animate-pulse' : 'text-slate-700'}`}>
                         <Clock size={20}/> {formatTime(timeLeft)}
                     </div>
                 ) : (
-                    <div className="font-bold text-xl text-slate-800">Exam Finished</div>
+                    <div className="font-bold text-xl text-slate-800">{practice ? 'Quiz Finished' : 'Exam Finished'}</div>
                 )}
             </div>
 
@@ -1343,7 +1344,7 @@ export default function App() {
                         {activeDeck.mode === 'dashboard' && <ModuleDashboard deck={activeDeck} onUpdateDeck={updateDeck} userProfile={userProfile} onUpdateProfile={updateProfile} />}
                         {activeDeck.mode === 'flashcards' && <FlashcardStudy cards={activeDeck.cards || []} deck={activeDeck} onUpdateDeck={updateDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} />}
                         {/* Using 'quiz' mode for practice, 'exam' mode passes special prop */}
-                        {activeDeck.mode === 'quiz' && <ExamRunner questions={activeDeck.quiz || []} deck={activeDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} userProfile={userProfile} />}
+                        {activeDeck.mode === 'quiz' && <ExamRunner questions={activeDeck.quiz || []} deck={activeDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} userProfile={userProfile} practice={true} />}
                         {activeDeck.mode === 'exam' && <ExamRunner questions={activeDeck.exams || []} deck={activeDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} userProfile={userProfile} />}
                         {activeDeck.mode === 'saq' && <SAQMode questions={activeDeck.saqs || []} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} userProfile={userProfile} />}
                     </>
