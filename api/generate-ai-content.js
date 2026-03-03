@@ -21,7 +21,7 @@ export default async function handler(req, res) {
     // or user ID if you can pass it from the client securely.
 
     // 4. Forward Request to Gemini API
-    const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent";
+    const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
     
     // We append the secret key here on the server
     const targetUrl = `${GEMINI_API_URL}?key=${GEMINI_API_KEY}`;

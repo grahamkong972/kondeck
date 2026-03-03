@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c \":*)",
+      "Bash(node -e \":*)",
+      "Bash(xxd src/App.jsx)",
+      "Bash(where node.exe)",
+      "Bash(cmd //c where node)",
+      "Bash(powershell -Command \"Get-Command node -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source\")",
+      "Bash(powershell -Command \"Get-Command npm | Select-Object Source; Get-Command node | Select-Object Source\")",
+      "Bash(powershell -Command \"Get-ChildItem -Path C:\\\\ -Filter node.exe -Recurse -ErrorAction SilentlyContinue | Select-Object FullName -First 5\")",
+      "Bash(powershell -NoProfile -Command \"Get-ChildItem -Path ''C:\\\\Users\\\\graham\\\\AppData'' -Filter ''node.exe'' -Recurse -ErrorAction SilentlyContinue | Select-Object FullName -First 5\")"
+    ]
+  }
+}
