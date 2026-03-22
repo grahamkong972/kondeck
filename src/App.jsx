@@ -218,10 +218,7 @@ const generateContent = async (prompt, context, systemInstruction, attachmentDat
 
     const requestBody = {
         contents: [{ parts: contentsPart }],
-        system_instruction: { parts: [{ text: fullSystemPrompt }] },
-        generationConfig: {
-            responseMimeType: "application/json"
-        }
+        system_instruction: { parts: [{ text: fullSystemPrompt }] }
     };
     
     // The key is now handled by the proxy function on the server
