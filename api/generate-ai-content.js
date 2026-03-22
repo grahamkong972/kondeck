@@ -39,7 +39,7 @@ export default async function handler(req, res) {
         const claudeBody = {
             model: MODEL,
             max_tokens: 8096,
-            system: systemPrompt,
+            ...(systemPrompt ? { system: systemPrompt } : {}),
             messages: [{ role: 'user', content: claudeContent }]
         };
 
