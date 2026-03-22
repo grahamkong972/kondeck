@@ -614,15 +614,27 @@ const SAQMode = ({ questions, onBack, userProfile }) => {
         setGrading(true);
         const marks = question.marks || 5;
         try {
-            const prompt = `
-                Act as a strict university professor. 
-                QUESTION: "${question.q}" (Worth ${marks} marks)
-                MODEL ANSWER: "${question.model}"
-                STUDENT ANSWER: "${userAnswer}"
-                
-                TASK: Grade the student answer out of ${marks}. Be critical but constructive.
-                RETURN JSON: { "score": number, "feedback": "Specific feedback", "missing": "Concepts missed" }
-            `;
+            const prompt = `You are a strict but fair university examiner grading a student's short answer response.
+
+QUESTION: "${question.q}"
+MARKS AVAILABLE: ${marks}
+MODEL ANSWER: "${question.model}"
+STUDENT ANSWER: "${userAnswer}"
+
+GRADING RULES:
+1. Award marks based on key points present in the student's answer compared to the model answer.
+   Roughly 1 mark per correct key point, scaled to ${marks} marks total.
+2. Do NOT penalise for different wording — reward correct understanding.
+3. Do NOT award marks for vague or circular statements (e.g. "X is X because it is X").
+4. Partial credit: if the student gets part of a multi-part concept right, award partial marks.
+5. The "feedback" field must:
+   - Start with what the student did well (if anything)
+   - Clearly explain why marks were deducted
+   - Be written as if speaking directly to the student
+6. The "missing" field must list only the key concepts/points from the model answer that the student omitted or got wrong. Be specific — not "more detail needed" but "you did not mention X".
+7. If the student scores full marks, set "missing" to "Nothing — full marks!".
+
+Return ONLY valid JSON: { "score": number, "feedback": "...", "missing": "..." }`;
             const result = await generateContent(prompt, "", "");
             setFeedback(result);
         } catch (e) { alert(e.message); } finally { setGrading(false); }
@@ -729,7 +741,38 @@ const FlashcardStudy = ({ cards, onBack, onUpdateDeck, deck }) => {
     const getHelp = async (type) => {
         if (loadingHelp) return;
         setLoadingHelp(true);
-        try { const res = await generateContent(`Provide a ${type} for: Q: ${currentCard.q}, A: ${currentCard.a}. Return JSON: {"text": "..."}`, ""); setAiHelp(res.text); } 
+        try {
+            const helpPrompt = type === 'simplify'
+                ? `A student is struggling to understand the following flashcard.
+
+QUESTION: "${currentCard.q}"
+ANSWER: "${currentCard.a}"
+
+Your task: Rewrite the answer in the simplest possible terms for a student who has never seen this concept before.
+- Use plain English. Avoid jargon unless you immediately explain it.
+- Use an analogy or real-world comparison if it helps.
+- Break it into short sentences or bullet points.
+- Do NOT just copy the original answer with minor rewording — genuinely simplify it.
+
+Return ONLY valid JSON: {"text": "..."}`
+                : `A student wants a memorable mnemonic or memory trick for the following flashcard.
+
+QUESTION: "${currentCard.q}"
+ANSWER: "${currentCard.a}"
+
+Your task: Create one of the following (choose whichever works best for this specific content):
+- An acronym (e.g. LIFO = "Last In, First Out")
+- A rhyme or phrase
+- A vivid story or analogy that encodes the key facts
+- A visual association
+
+Rules:
+- The mnemonic must directly encode the key facts from the answer, not just the question topic.
+- Briefly explain how to use it (i.e. what each part of the mnemonic maps to).
+- Keep it short and memorable — if it's too complex, it's useless.
+
+Return ONLY valid JSON: {"text": "..."}`;
+            const res = await generateContent(helpPrompt, ""); setAiHelp(res.text); }
         catch(e) { alert("AI Error"); } finally { setLoadingHelp(false); }
     };
 
@@ -952,7 +995,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile, onUpdateProfile }) =
 
                 if (type === "flashcards") {
                     prompt = `Generate exactly ${currentBatchCount} flashcards from the provided context.
-
+${dedupBlock}
 STRICT RULES:
 1. Every card must test a DIFFERENT concept. No rephrasing the same idea twice.
 2. Vary the question TYPE across the deck using this distribution:
@@ -975,10 +1018,10 @@ STRICT RULES:
 7. Do NOT generate cards that are trivially obvious or purely definitional
    if a deeper card on the same concept is possible.
 
-Return ONLY valid JSON: [{"q": "...", "a": "..."}]${dedupBlock}`;
+Return ONLY valid JSON: [{"q": "...", "a": "..."}]`;
                 } else if (type === "mcq") {
                     prompt = `Generate exactly ${currentBatchCount} multiple choice questions from the provided context.
-
+${dedupBlock}
 STRICT RULES:
 1. Every question must test a DIFFERENT concept. No rephrasing the same idea.
 2. Vary the difficulty and question TYPE:
@@ -1007,10 +1050,10 @@ Return ONLY valid JSON: [{
   "exp": "..."
 }]
 
-Where "a" is the zero-based index of the correct option.${dedupBlock}`;
+Where "a" is the zero-based index of the correct option.`;
                 } else if (type === "saq") {
                     prompt = `Generate exactly ${currentBatchCount} short answer questions from the provided context.
-
+${dedupBlock}
 STRICT RULES:
 1. Every question must test a DIFFERENT concept. No rephrasing the same idea.
 2. Questions must require genuine understanding, not just recall.
@@ -1043,7 +1086,7 @@ Return ONLY valid JSON: [{
   "q": "...",
   "model": "...",
   "marks": 5
-}]${dedupBlock}`;
+}]`;
                 }
 
                 try {
@@ -1087,13 +1130,54 @@ Return ONLY valid JSON: [{
              const combinedContext = `MODULE: ${deck.title}\nNOTES: ${currentInputs.notes}\nTRANSCRIPT: ${currentInputs.transcript}\nSLIDES TEXT: ${currentInputs.slides}`;
              let mcqs = [];
              if(numMCQs > 0) {
-                 const promptMCQ = `Generate ${numMCQs} HARD, scenario-based multiple choice questions for a FINAL EXAM. JSON: [{"q":..., "options":..., "a":..., "exp":...}]`;
+                 const promptMCQ = `Generate exactly ${numMCQs} multiple choice questions for a FINAL EXAM from the provided context.
+
+STRICT RULES:
+1. Every question must test a DIFFERENT concept. No rephrasing the same idea.
+2. Questions must be HARD — suitable for a final exam. Prioritise application, analysis, and scenario-based questions over pure recall.
+3. Vary the question TYPE:
+   - Scenario questions: describe a situation and ask what happens or what should be done
+   - Comparison questions: ask which option is correct given two similar concepts
+   - Misconception questions: include a plausible wrong answer that reflects a common misunderstanding
+   - Complexity questions: ask about time/space complexity with reasoning
+   - "What if" questions: change one condition and ask how the outcome changes
+4. DISTRACTOR RULES (wrong options):
+   - All wrong options must be PLAUSIBLE — no obviously silly distractors
+   - Wrong options should reflect real misconceptions students commonly hold
+   - All options should be similar in length and style
+   - Never make the correct answer obviously longer or more detailed
+5. Explanations must state why the correct answer is right AND why each wrong answer is wrong (briefly).
+6. Questions should not be answerable by elimination alone.
+
+Return ONLY valid JSON: [{"q": "...", "options": ["...", "...", "...", "..."], "a": 0, "exp": "..."}]
+Where "a" is the zero-based index of the correct option.`;
                  const rawMCQ = await generateContent(promptMCQ, combinedContext, "", null, numMCQs);
                  mcqs = validateAndFixData(Array.isArray(rawMCQ) ? rawMCQ : [rawMCQ], 'mcq');
             }
              let saqs = [];
              if(numSAQs > 0) {
-                 const promptSAQ = `Generate ${numSAQs} Short Answer Questions (SAQ). Assign marks (2-7). JSON: [{"q":..., "model":..., "marks":5}]`;
+                 const promptSAQ = `Generate exactly ${numSAQs} short answer questions for a FINAL EXAM from the provided context.
+
+STRICT RULES:
+1. Every question must test a DIFFERENT concept. No rephrasing the same idea.
+2. Questions must require genuine understanding — suitable for a final exam. No pure recall.
+   Bad: "What does LIFO stand for?"
+   Good: "Explain why a Stack is described as LIFO, and give a real-world scenario where this property is essential."
+3. Vary the question TYPE:
+   - Explanation: "Explain why X behaves the way it does"
+   - Comparison: "Compare X and Y, including when you would choose one over the other"
+   - Analysis: "Given this scenario, identify the problem and suggest a solution"
+   - Justification: "Is X always better than Y? Justify your answer"
+   - Design: "How would you implement X to achieve Y property?"
+   - Trade-off: "What are the trade-offs of using X in this context?"
+4. Mark allocation rules:
+   - 2 marks: single focused concept, one clear explanation
+   - 3-4 marks: comparison, two distinct points, or an example required
+   - 5-6 marks: multi-part explanation, justification, or analysis required
+   - 7 marks: synthesis of multiple concepts or a full design answer required
+5. Model answers must directly address every part of the question, include key terms an examiner would look for, and be proportional to the mark value (roughly one key point per mark).
+
+Return ONLY valid JSON: [{"q": "...", "model": "...", "marks": 5}]`;
                  const rawSAQ = await generateContent(promptSAQ, combinedContext, "", null, numSAQs);
                  saqs = validateAndFixData(Array.isArray(rawSAQ) ? rawSAQ : [rawSAQ], 'saq');
              }
@@ -1234,14 +1318,55 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, userProf
             
             let mcqs = [];
             if(numMCQs > 0) {
-                 const promptMCQ = `Generate ${numMCQs} HARD, scenario-based multiple choice questions for a FINAL EXAM. JSON: [{"q":..., "options":..., "a":..., "exp":...}]`;
+                 const promptMCQ = `Generate exactly ${numMCQs} multiple choice questions for a FINAL EXAM from the provided context.
+
+STRICT RULES:
+1. Every question must test a DIFFERENT concept. No rephrasing the same idea.
+2. Questions must be HARD — suitable for a final exam. Prioritise application, analysis, and scenario-based questions over pure recall.
+3. Vary the question TYPE:
+   - Scenario questions: describe a situation and ask what happens or what should be done
+   - Comparison questions: ask which option is correct given two similar concepts
+   - Misconception questions: include a plausible wrong answer that reflects a common misunderstanding
+   - Complexity questions: ask about time/space complexity with reasoning
+   - "What if" questions: change one condition and ask how the outcome changes
+4. DISTRACTOR RULES (wrong options):
+   - All wrong options must be PLAUSIBLE — no obviously silly distractors
+   - Wrong options should reflect real misconceptions students commonly hold
+   - All options should be similar in length and style
+   - Never make the correct answer obviously longer or more detailed
+5. Explanations must state why the correct answer is right AND why each wrong answer is wrong (briefly).
+6. Questions should not be answerable by elimination alone.
+
+Return ONLY valid JSON: [{"q": "...", "options": ["...", "...", "...", "..."], "a": 0, "exp": "..."}]
+Where "a" is the zero-based index of the correct option.`;
                  const rawMCQ = await generateContent(promptMCQ, combinedContext, "", null, numMCQs);
                  mcqs = validateAndFixData(Array.isArray(rawMCQ) ? rawMCQ : [rawMCQ], 'mcq');
             }
 
             let saqs = [];
             if(numSAQs > 0) {
-                 const promptSAQ = `Generate ${numSAQs} Short Answer Questions (SAQ). Assign marks (2-7). JSON: [{"q":..., "model":..., "marks":5}]`;
+                 const promptSAQ = `Generate exactly ${numSAQs} short answer questions for a FINAL EXAM from the provided context.
+
+STRICT RULES:
+1. Every question must test a DIFFERENT concept. No rephrasing the same idea.
+2. Questions must require genuine understanding — suitable for a final exam. No pure recall.
+   Bad: "What does LIFO stand for?"
+   Good: "Explain why a Stack is described as LIFO, and give a real-world scenario where this property is essential."
+3. Vary the question TYPE:
+   - Explanation: "Explain why X behaves the way it does"
+   - Comparison: "Compare X and Y, including when you would choose one over the other"
+   - Analysis: "Given this scenario, identify the problem and suggest a solution"
+   - Justification: "Is X always better than Y? Justify your answer"
+   - Design: "How would you implement X to achieve Y property?"
+   - Trade-off: "What are the trade-offs of using X in this context?"
+4. Mark allocation rules:
+   - 2 marks: single focused concept, one clear explanation
+   - 3-4 marks: comparison, two distinct points, or an example required
+   - 5-6 marks: multi-part explanation, justification, or analysis required
+   - 7 marks: synthesis of multiple concepts or a full design answer required
+5. Model answers must directly address every part of the question, include key terms an examiner would look for, and be proportional to the mark value (roughly one key point per mark).
+
+Return ONLY valid JSON: [{"q": "...", "model": "...", "marks": 5}]`;
                  const rawSAQ = await generateContent(promptSAQ, combinedContext, "", null, numSAQs);
                  saqs = validateAndFixData(Array.isArray(rawSAQ) ? rawSAQ : [rawSAQ], 'saq');
             }
