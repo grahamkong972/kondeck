@@ -115,22 +115,52 @@ const validateAndFixData = (data, type) => {
 };
 
 // --- NUCLEAR JSON PARSER ---
+const fixJsonEscapes = (str) => {
+    const VALID = new Set(['"', '\\', '/', 'b', 'f', 'n', 'r', 't']);
+    let out = '';
+    let i = 0;
+    while (i < str.length) {
+        const ch = str[i];
+        if (ch === '\\') {
+            const next = str[i + 1];
+            if (VALID.has(next)) {
+                out += ch + next;
+                i += 2;
+            } else if (next === 'u') {
+                const hex = str.substring(i + 2, i + 6);
+                if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+                    out += ch + next + hex;
+                    i += 6;
+                } else {
+                    out += '\\\\';
+                    i += 1;
+                }
+            } else {
+                // Invalid escape — double the backslash
+                out += '\\\\';
+                i += 1;
+            }
+        } else {
+            out += ch;
+            i++;
+        }
+    }
+    return out;
+};
+
 const cleanAndParseJSON = (text) => {
     if (!text) return null;
 
     // Strip markdown code fences
     let clean = text.replace(/```json/g, '').replace(/```/g, '').trim();
 
-    // Extract just the JSON array/object — ignore any prose before/after
+    // Extract just the JSON array — ignore any prose before/after
     const start = clean.indexOf('[');
     const end = clean.lastIndexOf(']');
     if (start !== -1 && end !== -1) clean = clean.substring(start, end + 1);
 
-    // Fix invalid escape sequences in two passes:
-    // 1. Fix \u not followed by exactly 4 hex digits
-    clean = clean.replace(/\\u(?![0-9a-fA-F]{4})/g, '\\\\u');
-    // 2. Fix any remaining \ not followed by a valid JSON escape char
-    clean = clean.replace(/\\([^"\\/bfnrtu])/g, '\\\\$1');
+    // Fix all invalid escape sequences with a character-by-character scan
+    clean = fixJsonEscapes(clean);
 
     try {
         return JSON.parse(clean);
