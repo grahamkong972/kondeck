@@ -908,46 +908,173 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile, onUpdateProfile }) =
         const hasAttachment = !!attachment;
         if (!hasText && !hasAttachment) return alert("Please add text or a file.");
 
-
         setIsGenerating(true);
         setStatusMessage("Initializing...");
         const currentInputs = { ...inputs };
+
         try {
-            const combinedContext = `MODULE: ${deck.title}\nNOTES: ${currentInputs.notes}\nTRANSCRIPT: ${currentInputs.transcript}\nSLIDES TEXT: ${currentInputs.slides}`;
+            const targetKey = type === 'flashcards' ? 'cards' : (type === 'saq' ? 'saqs' : 'quiz');
+
+            // Build deduplication context from existing deck items
+            const existingItems = deck[targetKey] || [];
+            const existingSummary = existingItems.length > 0
+                ? `\n\nALREADY EXISTS IN THIS DECK — DO NOT REPEAT THESE:\n${existingItems.map(c => `- ${c.q}`).join('\n')}`
+                : '';
+
+            const combinedContext = `MODULE: ${deck.title} NOTES: ${currentInputs.notes} TRANSCRIPT: ${currentInputs.transcript} SLIDES TEXT: ${currentInputs.slides} ${existingSummary}`;
+
             let systemInstruction = `Target audience: ${userProfile.age || 'University'} student`;
             if (userProfile.degree) systemInstruction += ` studying ${userProfile.degree}.`;
+
             let attachmentPayload = null;
             if (attachment?.file) attachmentPayload = await fileToBase64(attachment.file);
-            const BATCH_SIZE = (type === 'flashcards') ? 20 : 10; 
+
+            const BATCH_SIZE = (type === 'flashcards') ? 20 : 10;
             const totalBatches = Math.ceil(count / BATCH_SIZE);
             let accumulatedResults = [];
-            const targetKey = type === 'flashcards' ? 'cards' : (type === 'exam' ? 'exams' : (type === 'saq' ? 'saqs' : 'quiz'));
+
             for (let i = 0; i < totalBatches; i++) {
                 setStatusMessage(`Generating batch ${i + 1} of ${totalBatches}...`);
                 if (i > 0) await sleep(1000);
+
                 const itemsRemaining = count - accumulatedResults.length;
                 const currentBatchCount = Math.min(BATCH_SIZE, itemsRemaining);
+
+                // Track what this session has already generated
+                const sessionSummary = accumulatedResults.length > 0
+                    ? `\n\nALSO GENERATED THIS SESSION — DO NOT REPEAT:\n${accumulatedResults.map(c => `- ${c.q}`).join('\n')}`
+                    : '';
+
+                const fullContext = combinedContext + sessionSummary;
+
                 let prompt = "";
-                if (type === "flashcards") { prompt = `Generate ${currentBatchCount} flashcards (JSON: [{"q":..., "a":...}]).`; } 
-                else if (type === "saq") { prompt = `Generate ${currentBatchCount} Short Answer Questions (SAQ) testing deep understanding. Assign a mark value (2-7). JSON: [{"q": "...", "model": "...", "marks": 5}].`; } 
-                else { prompt = `Generate ${currentBatchCount} multiple choice questions (JSON: [{"q":..., "options":..., "a":..., "exp":...}]).`; }
+
+                if (type === "flashcards") {
+                    prompt = `Generate exactly ${currentBatchCount} flashcards from the provided context.
+
+STRICT RULES:
+1. Every card must test a DIFFERENT concept. No rephrasing the same idea twice.
+2. Vary the question TYPE across the deck using this distribution:
+   - Definition cards: "What is X?" or "Define X"
+   - Distinction cards: "What is the difference between X and Y?"
+   - Application cards: "When would you use X over Y, and why?"
+   - Consequence cards: "What happens if X property is violated?"
+   - Complexity cards: "What is the time/space complexity of X and why?"
+   - Example cards: "Give an example of X occurring in practice"
+   - Process cards: "Walk through the steps of X"
+   - Property cards: "What are the key properties of X?"
+3. Answers must be COMPLETE and self-contained.
+   Someone reading only the answer should fully understand the concept.
+4. No one-word or one-line answers unless the concept genuinely requires it.
+5. For complexity or technical topics, always explain WHY not just WHAT.
+6. Prioritise concepts that are:
+   - Commonly confused with similar concepts
+   - Easy to memorise incorrectly
+   - Foundational to understanding later topics
+7. Do NOT generate cards that are trivially obvious or purely definitional
+   if a deeper card on the same concept is possible.
+
+Return ONLY valid JSON: [{"q": "...", "a": "..."}]`;
+                } else if (type === "mcq") {
+                    prompt = `Generate exactly ${currentBatchCount} multiple choice questions from the provided context.
+
+STRICT RULES:
+1. Every question must test a DIFFERENT concept. No rephrasing the same idea.
+2. Vary the difficulty and question TYPE:
+   - Recall questions: directly test factual knowledge
+   - Application questions: present a scenario and ask what would happen
+   - Comparison questions: ask which option is correct given two similar concepts
+   - Misconception questions: include a plausible-sounding wrong answer that
+     reflects a common student misunderstanding
+   - Complexity questions: ask about time/space complexity with reasoning
+   - "What if" questions: change one condition and ask how the outcome changes
+3. DISTRACTOR RULES (wrong options):
+   - All wrong options must be PLAUSIBLE. No obviously silly options.
+   - Wrong options should reflect real misconceptions, not random guesses.
+   - All options should be similar in length and style to avoid giveaways.
+   - Never make the correct answer obviously longer or more detailed.
+4. Explanations must state:
+   - Why the correct answer is right
+   - Why each wrong answer is wrong (briefly)
+5. Questions should not be answerable by elimination alone.
+6. Avoid trick questions or deliberately misleading wording.
+
+Return ONLY valid JSON: [{
+  "q": "...",
+  "options": ["...", "...", "...", "..."],
+  "a": 0,
+  "exp": "..."
+}]
+
+Where "a" is the zero-based index of the correct option.`;
+                } else if (type === "saq") {
+                    prompt = `Generate exactly ${currentBatchCount} short answer questions from the provided context.
+
+STRICT RULES:
+1. Every question must test a DIFFERENT concept. No rephrasing the same idea.
+2. Questions must require genuine understanding, not just recall.
+   Bad: "What does LIFO stand for?"
+   Good: "Explain why a Stack is described as LIFO, and give a real-world
+          scenario where this property is essential."
+3. Vary the question TYPE:
+   - Explanation questions: "Explain why X behaves the way it does"
+   - Comparison questions: "Compare X and Y, including when you would
+     choose one over the other"
+   - Analysis questions: "Given this scenario, identify the problem and
+     suggest a solution using concepts from this module"
+   - Justification questions: "Is X always better than Y? Justify your answer"
+   - Design questions: "How would you implement X to achieve Y property?"
+   - Trade-off questions: "What are the trade-offs of using X in this context?"
+4. Mark allocation rules:
+   - 2 marks: single focused concept, one clear explanation
+   - 3-4 marks: requires comparison, two distinct points, or an example
+   - 5-6 marks: requires multi-part explanation, justification, or analysis
+   - 7 marks: requires synthesis of multiple concepts or a full design answer
+5. Model answers must:
+   - Directly address every part of the question
+   - Be written at the level expected of a student, not a textbook
+   - Include the key terms an examiner would look for
+   - Be proportional to the mark value (roughly one key point per mark)
+6. Do not write questions that can be answered in one sentence
+   unless the mark value is 2.
+
+Return ONLY valid JSON: [{
+  "q": "...",
+  "model": "...",
+  "marks": 5
+}]`;
+                }
+
                 try {
-                    const batchResult = await generateContent(prompt, combinedContext, systemInstruction, attachmentPayload, currentBatchCount);
-                    const validatedResult = validateAndFixData(Array.isArray(batchResult) ? batchResult : [batchResult], type === 'exam' ? 'mcq' : type);
+                    const batchResult = await generateContent(
+                        prompt,
+                        fullContext,
+                        systemInstruction,
+                        attachmentPayload,
+                        currentBatchCount
+                    );
+                    const validatedResult = validateAndFixData(
+                        Array.isArray(batchResult) ? batchResult : [batchResult],
+                        type === 'exam' ? 'mcq' : type
+                    );
                     accumulatedResults = [...accumulatedResults, ...validatedResult];
-                } catch (batchError) { console.error(batchError); break; }
+                } catch (batchError) {
+                    console.error(batchError);
+                    break;
+                }
             }
-            // Step 2: After the loop finishes without error:
+
             setStatusMessage("Saving...");
-            const updatedDeck = { ...deck, ...currentInputs }; 
+            const updatedDeck = { ...deck, ...currentInputs };
             updatedDeck[targetKey] = [...(deck[targetKey] || []), ...accumulatedResults];
             onUpdateDeck(updatedDeck);
-            
 
-        } catch (error) { 
-            alert(error.message); 
-        } finally { 
-            setIsGenerating(false); setStatusMessage(""); }
+        } catch (error) {
+            alert(error.message);
+        } finally {
+            setIsGenerating(false);
+            setStatusMessage("");
+        }
     };
 
     // Live Exam Generation for Module
