@@ -972,7 +972,9 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile, onUpdateProfile }) =
                 ? `\n\nDO NOT REPEAT — ALREADY IN DECK:\n${existingItems.map(c => `- ${c.q}`).join('\n')}`
                 : '';
 
-            const combinedContext = `MODULE: ${deck.title} NOTES: ${currentInputs.notes} TRANSCRIPT: ${currentInputs.transcript} SLIDES TEXT: ${currentInputs.slides}`;
+            const fullContext = `MODULE: ${deck.title} NOTES: ${currentInputs.notes} TRANSCRIPT: ${currentInputs.transcript} SLIDES TEXT: ${currentInputs.slides}`;
+            // Subsequent batches skip the transcript — full content already used in batch 1
+            const minimalContext = `MODULE: ${deck.title}`;
 
             let systemInstruction = `Target audience: ${userProfile.age || 'University'} student`;
             if (userProfile.degree) systemInstruction += ` studying ${userProfile.degree}.`;
@@ -1100,9 +1102,9 @@ Return ONLY valid JSON: [{
                 try {
                     const batchResult = await generateContent(
                         prompt,
-                        combinedContext,
+                        i === 0 ? fullContext : minimalContext,
                         systemInstruction,
-                        attachmentPayload,
+                        i === 0 ? attachmentPayload : null,
                         currentBatchCount
                     );
                     const validatedResult = validateAndFixData(
