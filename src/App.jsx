@@ -236,7 +236,7 @@ const generateContent = async (prompt, context, systemInstruction, attachmentDat
 
             if (!response.ok) {
                 const errorData = await response.json();
-                throw new Error(`AI Request Proxy Error: ${errorData.error || response.statusText}`);
+                throw new Error(`AI Request Proxy Error: ${errorData.error || response.statusText}${errorData.details ? ` — ${errorData.details}` : ''}`);
             }
             
             const data = await response.json();
