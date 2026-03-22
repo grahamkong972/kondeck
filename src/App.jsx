@@ -915,13 +915,13 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile, onUpdateProfile }) =
         try {
             const targetKey = type === 'flashcards' ? 'cards' : (type === 'saq' ? 'saqs' : 'quiz');
 
-            // Build deduplication context from existing deck items
+            // Build deduplication list from existing deck items (injected into prompt, not context)
             const existingItems = deck[targetKey] || [];
             const existingSummary = existingItems.length > 0
-                ? `\n\nALREADY EXISTS IN THIS DECK — DO NOT REPEAT THESE:\n${existingItems.map(c => `- ${c.q}`).join('\n')}`
+                ? `\n\nDO NOT REPEAT — ALREADY IN DECK:\n${existingItems.map(c => `- ${c.q}`).join('\n')}`
                 : '';
 
-            const combinedContext = `MODULE: ${deck.title} NOTES: ${currentInputs.notes} TRANSCRIPT: ${currentInputs.transcript} SLIDES TEXT: ${currentInputs.slides} ${existingSummary}`;
+            const combinedContext = `MODULE: ${deck.title} NOTES: ${currentInputs.notes} TRANSCRIPT: ${currentInputs.transcript} SLIDES TEXT: ${currentInputs.slides}`;
 
             let systemInstruction = `Target audience: ${userProfile.age || 'University'} student`;
             if (userProfile.degree) systemInstruction += ` studying ${userProfile.degree}.`;
@@ -940,12 +940,13 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile, onUpdateProfile }) =
                 const itemsRemaining = count - accumulatedResults.length;
                 const currentBatchCount = Math.min(BATCH_SIZE, itemsRemaining);
 
-                // Track what this session has already generated
+                // Dedup: questions generated so far this session
                 const sessionSummary = accumulatedResults.length > 0
-                    ? `\n\nALSO GENERATED THIS SESSION — DO NOT REPEAT:\n${accumulatedResults.map(c => `- ${c.q}`).join('\n')}`
+                    ? `\n\nDO NOT REPEAT — ALREADY GENERATED THIS SESSION:\n${accumulatedResults.map(c => `- ${c.q}`).join('\n')}`
                     : '';
 
-                const fullContext = combinedContext + sessionSummary;
+                // Both dedup lists go at the END of the prompt so the model sees them last
+                const dedupBlock = existingSummary + sessionSummary;
 
                 let prompt = "";
 
@@ -974,7 +975,7 @@ STRICT RULES:
 7. Do NOT generate cards that are trivially obvious or purely definitional
    if a deeper card on the same concept is possible.
 
-Return ONLY valid JSON: [{"q": "...", "a": "..."}]`;
+Return ONLY valid JSON: [{"q": "...", "a": "..."}]${dedupBlock}`;
                 } else if (type === "mcq") {
                     prompt = `Generate exactly ${currentBatchCount} multiple choice questions from the provided context.
 
@@ -1006,7 +1007,7 @@ Return ONLY valid JSON: [{
   "exp": "..."
 }]
 
-Where "a" is the zero-based index of the correct option.`;
+Where "a" is the zero-based index of the correct option.${dedupBlock}`;
                 } else if (type === "saq") {
                     prompt = `Generate exactly ${currentBatchCount} short answer questions from the provided context.
 
@@ -1042,13 +1043,13 @@ Return ONLY valid JSON: [{
   "q": "...",
   "model": "...",
   "marks": 5
-}]`;
+}]${dedupBlock}`;
                 }
 
                 try {
                     const batchResult = await generateContent(
                         prompt,
-                        fullContext,
+                        combinedContext,
                         systemInstruction,
                         attachmentPayload,
                         currentBatchCount
