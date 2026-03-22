@@ -117,18 +117,29 @@ const validateAndFixData = (data, type) => {
 // --- NUCLEAR JSON PARSER ---
 const cleanAndParseJSON = (text) => {
     if (!text) return null;
+
+    // Strip markdown code fences
     let clean = text.replace(/```json/g, '').replace(/```/g, '').trim();
-    clean = clean.replace(/\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})/g, "\\\\");
+
+    // Extract just the JSON array/object — ignore any prose before/after
+    const start = clean.indexOf('[');
+    const end = clean.lastIndexOf(']');
+    if (start !== -1 && end !== -1) clean = clean.substring(start, end + 1);
+
+    // Fix invalid escape sequences in two passes:
+    // 1. Fix \u not followed by exactly 4 hex digits
+    clean = clean.replace(/\\u(?![0-9a-fA-F]{4})/g, '\\\\u');
+    // 2. Fix any remaining \ not followed by a valid JSON escape char
+    clean = clean.replace(/\\([^"\\/bfnrtu])/g, '\\\\$1');
 
     try {
         return JSON.parse(clean);
     } catch (e) {
-        if (clean.startsWith('[') && !clean.endsWith(']')) {
-            const lastClose = clean.lastIndexOf('}');
-            if (lastClose !== -1) {
-                const fixed = clean.substring(0, lastClose + 1) + ']';
-                try { return JSON.parse(fixed); } catch (e2) { console.error("Repair failed", e2); }
-            }
+        // Truncate to last complete object and close the array
+        const lastClose = clean.lastIndexOf('}');
+        if (lastClose !== -1 && clean.startsWith('[')) {
+            const fixed = clean.substring(0, lastClose + 1) + ']';
+            try { return JSON.parse(fixed); } catch (e2) { /* fall through */ }
         }
         console.error("JSON Parse Error:", e);
         return null;
@@ -969,7 +980,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile, onUpdateProfile }) =
             let attachmentPayload = null;
             if (attachment?.file) attachmentPayload = await fileToBase64(attachment.file);
 
-            const BATCH_SIZE = (type === 'flashcards') ? 20 : 10;
+            const BATCH_SIZE = (type === 'flashcards') ? 30 : 15;
             const totalBatches = Math.ceil(count / BATCH_SIZE);
             let accumulatedResults = [];
 
