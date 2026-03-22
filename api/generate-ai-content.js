@@ -1,6 +1,6 @@
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
-const MODEL = "claude-sonnet-4-6";
+const MODEL = "claude-haiku-4-5-20251001";
 
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
