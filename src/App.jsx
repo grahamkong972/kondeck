@@ -40,6 +40,33 @@ try {
     console.log("Firebase init skipped (local mode)");
 }
 
+// --- TOAST NOTIFICATION SYSTEM ---
+const ToastContext = React.createContext(null);
+
+const ToastProvider = ({ children }) => {
+    const [toasts, setToasts] = useState([]);
+    const toast = useCallback((message, type = 'error') => {
+        const id = Date.now() + Math.random();
+        setToasts(prev => [...prev, { id, message, type }]);
+        setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000);
+    }, []);
+    return (
+        <ToastContext.Provider value={toast}>
+            {children}
+            <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none">
+                {toasts.map(t => (
+                    <div key={t.id} className={`flex items-center gap-2.5 px-4 py-3 rounded-xl shadow-lg text-white text-sm font-medium animate-fade-in-up pointer-events-auto max-w-sm ${t.type === 'error' ? 'bg-red-500' : 'bg-emerald-500'}`}>
+                        {t.type === 'error' ? <XCircle size={15} className="shrink-0" /> : <CheckCircle size={15} className="shrink-0" />}
+                        <span>{t.message}</span>
+                    </div>
+                ))}
+            </div>
+        </ToastContext.Provider>
+    );
+};
+
+const useToast = () => React.useContext(ToastContext);
+
 // --- UTILS ---
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -208,7 +235,7 @@ const FormattedText = ({ text, className = "" }) => {
         } else {
             renderMath();
         }
-    }); 
+    }, []);
 
     if (text === null || text === undefined) return null;
 
@@ -232,6 +259,84 @@ const FormattedText = ({ text, className = "" }) => {
     );
 };
 
+// --- AI SERVICE: multi-turn conversation per deck ---
+// Sends context ONCE on the first call (cached server-side).
+// All subsequent calls reuse the stored history — no re-sending the transcript.
+const generateForDeck = async (prompt, systemInstruction, contextHistory, contextText = null, attachmentPayload = null) => {
+    const PROXY_URL = `/api/generate-ai-content`;
+    const systemPrompt = `
+        You are KonDeck, an advanced AI tutor.
+        ${systemInstruction || ''}
+        CRITICAL OUTPUT RULES:
+        1. Return ONLY valid JSON.
+        2. Do NOT use markdown code blocks.
+        3. Double-escape all backslashes in LaTeX (e.g. \\\\alpha).
+        4. Use HTML <br/> for line breaks.
+        5. Use MARKDOWN for text formatting (e.g. **bold**).
+        6. Use LaTeX ($...$) ONLY for mathematical formulas.
+    `;
+
+    const isFirstCall = !contextHistory;
+    let messages;
+
+    if (isFirstCall) {
+        const contentBlocks = [];
+        if (contextText) {
+            contentBlocks.push({ type: 'text', text: `CONTEXT:\n${contextText}`, cache_control: { type: 'ephemeral' } });
+        }
+        if (attachmentPayload?.inlineData) {
+            const { data, mimeType } = attachmentPayload.inlineData;
+            const block = mimeType === 'application/pdf'
+                ? { type: 'document', source: { type: 'base64', media_type: mimeType, data } }
+                : { type: 'image', source: { type: 'base64', media_type: mimeType, data } };
+            block.cache_control = { type: 'ephemeral' };
+            contentBlocks.push(block);
+        }
+        contentBlocks.push({ type: 'text', text: `TASK:\n${prompt}` });
+        messages = [{ role: 'user', content: contentBlocks }];
+    } else {
+        messages = [...contextHistory, { role: 'user', content: [{ type: 'text', text: `TASK:\n${prompt}` }] }];
+    }
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+            const response = await fetch(PROXY_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ messages, system_instruction: { parts: [{ text: systemPrompt }] } })
+            });
+            if (response.status === 429) throw new Error("Quota Exceeded. Too many requests.");
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(`AI Error: ${err.error || response.statusText}${err.details ? ` — ${err.details}` : ''}`);
+            }
+            const data = await response.json();
+            const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (!text) throw new Error("No content generated.");
+
+            const result = cleanAndParseJSON(text);
+
+            // After first call, store a slim 2-message history: [contextUser, ackAssistant]
+            // This keeps history small — only the context blocks, not the large card JSON.
+            let updatedHistory = contextHistory;
+            if (isFirstCall) {
+                const contextBlocks = messages[0].content.slice(0, -1); // drop TASK block
+                if (contextBlocks.length > 0) {
+                    updatedHistory = [
+                        { role: 'user', content: contextBlocks },
+                        { role: 'assistant', content: [{ type: 'text', text: 'Context received.' }] }
+                    ];
+                }
+            }
+            return { result, contextHistory: updatedHistory };
+        } catch (error) {
+            console.warn(`Attempt ${attempt + 1} failed:`, error.message);
+            if (attempt === 2) throw error;
+            await sleep(2000 * (attempt + 1));
+        }
+    }
+};
+
 // --- GEMINI AI SERVICE (Refactored to use Vercel Proxy) ---
 const generateContent = async (prompt, context, systemInstruction, attachmentData = null, quantity = 1) => {
     // The apiKey check is now removed from the client side.
@@ -251,11 +356,14 @@ const generateContent = async (prompt, context, systemInstruction, attachmentDat
         6. Use LaTeX ($...$) ONLY for mathematical formulas.
     `;
 
-    const contentsPart = [{ text: `CONTEXT:\n${context}\n\nTASK:\n${prompt}` }];
+    // Send context and task as separate parts so the server can cache the context block
+    const contentsPart = [];
+    if (context) contentsPart.push({ text: `CONTEXT:\n${context}` });
     if (attachmentData) {
-        contentsPart.push(attachmentData); 
-        contentsPart[0].text += "\n\n[DOCUMENT CONTEXT]: Analyze the attached image or PDF document carefully.";
+        contentsPart.push(attachmentData);
+        contentsPart.push({ text: "[DOCUMENT CONTEXT]: Analyze the attached image or PDF document carefully." });
     }
+    contentsPart.push({ text: `TASK:\n${prompt}` });
 
     const requestBody = {
         contents: [{ parts: contentsPart }],
@@ -420,7 +528,8 @@ const ManageModal = ({ type, items, onClose, onDeleteItem, onDeleteAll }) => {
 };
 
 const ExamSetupModal = ({ modules, onClose, onStartExam }) => {
-    const [selectedModuleIds, setSelectedModuleIds] = useState(modules.map(m => m.id)); 
+    const toast = useToast();
+    const [selectedModuleIds, setSelectedModuleIds] = useState(modules.map(m => m.id));
     const [totalMarks, setTotalMarks] = useState(100);
     const [mcqPercentage, setMcqPercentage] = useState(50);
     const [timeLimit, setTimeLimit] = useState(120);
@@ -436,7 +545,7 @@ const ExamSetupModal = ({ modules, onClose, onStartExam }) => {
     };
 
     const handleStart = () => {
-        if (selectedModuleIds.length === 0) return alert("Select at least one module.");
+        if (selectedModuleIds.length === 0) return toast("Select at least one module.");
         onStartExam({
             moduleIds: selectedModuleIds,
             numMCQs,
@@ -494,6 +603,7 @@ const ExamSetupModal = ({ modules, onClose, onStartExam }) => {
 
 // --- EXAM RUNNER ---
 const ExamRunner = ({ questions, timeLimit, onBack, userProfile, practice = false }) => {
+    const toast = useToast();
     const [answers, setAnswers] = useState({});
     const [saqFeedback, setSaqFeedback] = useState({});
     const [submitted, setSubmitted] = useState(false);
@@ -529,7 +639,7 @@ const ExamRunner = ({ questions, timeLimit, onBack, userProfile, practice = fals
             const prompt = `Grade this SAQ out of ${marks}. Question: "${q.q}". Model: "${q.model}". Student: "${userAns}". Return JSON: { "score": number, "feedback": "string", "missing": "string" }`; // Note: This is a placeholder for the actual prompt
             const result = await generateContent(prompt, "", "");
             setSaqFeedback(prev => ({ ...prev, [index]: result }));
-        } catch (e) { alert(e.message); } 
+        } catch (e) { toast(e.message); }
         finally { setGradingLoading(prev => ({ ...prev, [index]: false })); }
     };
 
@@ -638,6 +748,7 @@ const ExamRunner = ({ questions, timeLimit, onBack, userProfile, practice = fals
 
 // --- SAQ MODE ---
 const SAQMode = ({ questions, onBack, userProfile }) => {
+    const toast = useToast();
     const [idx, setIdx] = useState(0);
     const [userAnswer, setUserAnswer] = useState("");
     const [grading, setGrading] = useState(false);
@@ -647,7 +758,7 @@ const SAQMode = ({ questions, onBack, userProfile }) => {
 
 
     const handleGrade = async () => {
-        if (!userAnswer.trim()) return alert("Please type an answer first.");
+        if (!userAnswer.trim()) return toast("Please type an answer first.");
 
         setGrading(true);
         const marks = question.marks || 5;
@@ -675,7 +786,7 @@ GRADING RULES:
 Return ONLY valid JSON: { "score": number, "feedback": "...", "missing": "..." }`;
             const result = await generateContent(prompt, "", "");
             setFeedback(result);
-        } catch (e) { alert(e.message); } finally { setGrading(false); }
+        } catch (e) { toast(e.message); } finally { setGrading(false); }
     };
 
     const nextQuestion = () => { setFeedback(null); setUserAnswer(""); setIdx(prev => (prev + 1) % questions.length); };
@@ -728,6 +839,7 @@ Return ONLY valid JSON: { "score": number, "feedback": "...", "missing": "..." }
 
 // --- FLASHCARD STUDY COMPONENT ---
 const FlashcardStudy = ({ cards, onBack, onUpdateDeck, deck }) => {
+    const toast = useToast();
     const [idx, setIdx] = useState(0);
     const [flipped, setFlipped] = useState(false);
     const [aiHelp, setAiHelp] = useState(null);
@@ -811,7 +923,7 @@ Rules:
 
 Return ONLY valid JSON: {"text": "..."}`;
             const res = await generateContent(helpPrompt, ""); setAiHelp(res.text); }
-        catch(e) { alert("AI Error"); } finally { setLoadingHelp(false); }
+        catch(e) { toast(e.message || "AI Error"); } finally { setLoadingHelp(false); }
     };
 
     if (sessionComplete) {
@@ -921,6 +1033,7 @@ const Sidebar = ({ user, folders, decks, activeId, viewMode, onSelectDeck, onSel
 };
 
 const ModuleDashboard = ({ deck, onUpdateDeck, userProfile, onUpdateProfile }) => {
+    const toast = useToast();
     const [isGenerating, setIsGenerating] = useState(false);
     const [statusMessage, setStatusMessage] = useState("");
     const [genType, setGenType] = useState("flashcards");
@@ -972,7 +1085,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile, onUpdateProfile }) =
     const handleFileUpload = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        if (file.size > 10 * 1024 * 1024) { return alert("File too large (>10MB)."); }
+        if (file.size > 10 * 1024 * 1024) { return toast("File too large (>10MB)."); }
         if (file.type.startsWith('image/')) {
             const reader = new FileReader();
             reader.onload = (e) => setAttachment({ type: 'image', data: e.target.result, file });
@@ -987,7 +1100,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile, onUpdateProfile }) =
     const handleGenerate = async (type) => {
         const hasText = inputs.notes.trim() || inputs.transcript.trim() || inputs.slides.trim();
         const hasAttachment = !!attachment;
-        if (!hasText && !hasAttachment) return alert("Please add text or a file.");
+        if (!hasText && !hasAttachment) return toast("Please add text or a file.");
 
         setIsGenerating(true);
         setStatusMessage("Initializing...");
@@ -1003,14 +1116,19 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile, onUpdateProfile }) =
                 : '';
 
             const fullContext = `MODULE: ${deck.title} NOTES: ${currentInputs.notes} TRANSCRIPT: ${currentInputs.transcript} SLIDES TEXT: ${currentInputs.slides}`;
-            // Subsequent batches skip the transcript — full content already used in batch 1
-            const minimalContext = `MODULE: ${deck.title}`;
+            // Fingerprint the context — if it changes, reset the stored conversation history
+            const contextKey = fullContext.slice(0, 300);
 
             let systemInstruction = `Target audience: ${userProfile.age || 'University'} student`;
             if (userProfile.degree) systemInstruction += ` studying ${userProfile.degree}.`;
 
             let attachmentPayload = null;
             if (attachment?.file) attachmentPayload = await fileToBase64(attachment.file);
+
+            // Restore stored history for this deck, or null if context has changed
+            let currentContextHistory = (deck.convHistory && deck.convContextKey === contextKey)
+                ? deck.convHistory
+                : null;
 
             const BATCH_SIZE = (type === 'flashcards') ? 30 : 15;
             const totalBatches = Math.ceil(count / BATCH_SIZE);
@@ -1130,13 +1248,14 @@ Return ONLY valid JSON: [{
                 }
 
                 try {
-                    const batchResult = await generateContent(
+                    const { result: batchResult, contextHistory: updatedHistory } = await generateForDeck(
                         prompt,
-                        i === 0 ? fullContext : minimalContext,
                         systemInstruction,
-                        i === 0 ? attachmentPayload : null,
-                        currentBatchCount
+                        currentContextHistory,
+                        currentContextHistory ? null : fullContext,
+                        currentContextHistory ? null : attachmentPayload
                     );
+                    currentContextHistory = updatedHistory;
                     const validatedResult = validateAndFixData(
                         Array.isArray(batchResult) ? batchResult : [batchResult],
                         type === 'exam' ? 'mcq' : type
@@ -1144,6 +1263,10 @@ Return ONLY valid JSON: [{
                     accumulatedResults = [...accumulatedResults, ...validatedResult];
                 } catch (batchError) {
                     console.error(batchError);
+                    setStatusMessage(accumulatedResults.length > 0
+                        ? `Batch ${i + 1} failed — saving ${accumulatedResults.length} item(s) generated so far.`
+                        : `Generation failed: ${batchError.message}`
+                    );
                     break;
                 }
             }
@@ -1151,10 +1274,12 @@ Return ONLY valid JSON: [{
             setStatusMessage("Saving...");
             const updatedDeck = { ...deck, ...currentInputs };
             updatedDeck[targetKey] = [...(deck[targetKey] || []), ...accumulatedResults];
+            updatedDeck.convHistory = currentContextHistory;
+            updatedDeck.convContextKey = contextKey;
             onUpdateDeck(updatedDeck);
 
         } catch (error) {
-            alert(error.message);
+            toast(error.message);
         } finally {
             setIsGenerating(false);
             setStatusMessage("");
@@ -1225,9 +1350,9 @@ Return ONLY valid JSON: [{"q": "...", "model": "...", "marks": 5}]`;
              setExamTimeLimit(timeLimit);
              setActiveExamData(finalExam);
              setShowExamSetup(false);
-        } catch(e) { alert(e.message); } finally { setIsGenerating(false); setStatusMessage(""); }
+        } catch(e) { toast(e.message); } finally { setIsGenerating(false); setStatusMessage(""); }
     };
-    
+
     if (activeExamData) { return <ExamRunner questions={activeExamData} timeLimit={examTimeLimit} onBack={() => setActiveExamData(null)} userProfile={userProfile} />; }
     if (isGenerating && statusMessage.includes("Exam")) { return (<div className="h-full flex flex-col items-center justify-center"><RotateCw className="animate-spin text-indigo-600 mb-4" size={48} /><h3 className="text-xl font-bold text-slate-800">Generating Exam Paper...</h3><p className="text-slate-500">Creating custom questions for {deck.title}</p></div>) }
 
@@ -1309,6 +1434,7 @@ Return ONLY valid JSON: [{"q": "...", "model": "...", "marks": 5}]`;
 
 // --- FOLDER DASHBOARD (Defined BEFORE ModuleDashboard) ---
 const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, userProfile }) => {
+    const toast = useToast();
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [syllabusText, setSyllabusText] = useState(folder.syllabus || "");
     const [isGlobalStudy, setIsGlobalStudy] = useState(false);
@@ -1323,17 +1449,17 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, userProf
     const handleSaveSyllabus = () => onUpdateFolder({ ...folder, syllabus: syllabusText }); 
 
     const handleAnalyze = async () => {
-        if (!syllabusText.trim()) return alert("Please paste the Course Outline first.");
+        if (!syllabusText.trim()) return toast("Please paste the Course Outline first.");
         setIsAnalyzing(true);
         try {
             const allContent = decks.map(d => `MODULE: ${d.title}\nNOTES: ${d.notes || ''}\nSLIDES: ${d.slides || ''}\nTRANSCRIPT: ${d.transcript || ''}`).join("\n\n----------------\n\n");
-            if (!allContent.trim()) return alert("No content found in modules!");
+            if (!allContent.trim()) return toast("No content found in modules!");
             const prompt = `Analyze 'STUDENT MATERIALS' against 'OFFICIAL SYLLABUS'. Return JSON: {"score": 0-100, "analysis": "summary", "missing": "missing topics"}`;
             const context = `OFFICIAL SYLLABUS:\n${syllabusText}\n\nSTUDENT MATERIALS:\n${allContent}`;
             const result = await generateContent(prompt, context, "", null, 1);
             onUpdateFolder({ ...folder, syllabus: syllabusText, coverage: result });
-        } catch (error) { 
-            alert(error.message); 
+        } catch (error) {
+            toast(error.message);
         } finally { setIsAnalyzing(false); }
     };
 
@@ -1418,7 +1544,7 @@ Return ONLY valid JSON: [{"q": "...", "model": "...", "marks": 5}]`;
             setActiveExamData(finalExam);
             setShowExamSetup(false);
         } catch (e) {
-            alert(e.message);
+            toast(e.message);
         } finally {
             setIsExamGenerating(false);
         }
@@ -1620,6 +1746,7 @@ export default function App() {
     }
 
     return (
+        <ToastProvider>
         <div className="flex h-screen bg-[#f8fafc] font-sans text-slate-900">
             <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
             <Sidebar 
@@ -1695,5 +1822,6 @@ export default function App() {
                 </div>
             )}
         </div>
+        </ToastProvider>
     );
 }

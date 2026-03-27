@@ -12,35 +12,44 @@ export default async function handler(req, res) {
     }
 
     try {
-        const { contents, system_instruction } = req.body;
+        const { contents, system_instruction, messages } = req.body;
 
         // Extract system prompt from Gemini-format body
         const systemPrompt = system_instruction?.parts?.[0]?.text || '';
 
-        // Extract user message parts from Gemini-format body
-        const geminiParts = contents?.[0]?.parts || [];
+        let claudeMessages;
 
-        // Convert Gemini parts to Claude content blocks
-        const claudeContent = geminiParts.map(part => {
-            if (part.text) {
-                return { type: 'text', text: part.text };
-            }
-            if (part.inlineData) {
-                const { data, mimeType } = part.inlineData;
-                if (mimeType === 'application/pdf') {
-                    return { type: 'document', source: { type: 'base64', media_type: mimeType, data } };
+        if (messages) {
+            // Multi-turn mode: messages already in Claude format with cache_control embedded
+            claudeMessages = messages;
+        } else {
+            // Single-turn Gemini-compat mode (used by grading, syllabus check, etc.)
+            const geminiParts = contents?.[0]?.parts || [];
+            const rawContent = geminiParts.map(part => {
+                if (part.text) return { type: 'text', text: part.text };
+                if (part.inlineData) {
+                    const { data, mimeType } = part.inlineData;
+                    if (mimeType === 'application/pdf') {
+                        return { type: 'document', source: { type: 'base64', media_type: mimeType, data } };
+                    }
+                    return { type: 'image', source: { type: 'base64', media_type: mimeType, data } };
                 }
-                // image/*
-                return { type: 'image', source: { type: 'base64', media_type: mimeType, data } };
-            }
-            return null;
-        }).filter(Boolean);
+                return null;
+            }).filter(Boolean);
+            // Mark every block except the last (the task) as cacheable
+            const claudeContent = rawContent.map((block, i) =>
+                i < rawContent.length - 1
+                    ? { ...block, cache_control: { type: 'ephemeral' } }
+                    : block
+            );
+            claudeMessages = [{ role: 'user', content: claudeContent }];
+        }
 
         const claudeBody = {
             model: MODEL,
             max_tokens: 8096,
             ...(systemPrompt ? { system: systemPrompt } : {}),
-            messages: [{ role: 'user', content: claudeContent }]
+            messages: claudeMessages
         };
 
         const response = await fetch(ANTHROPIC_API_URL, {
@@ -48,7 +57,8 @@ export default async function handler(req, res) {
             headers: {
                 'Content-Type': 'application/json',
                 'x-api-key': ANTHROPIC_API_KEY,
-                'anthropic-version': '2023-06-01'
+                'anthropic-version': '2023-06-01',
+                'anthropic-beta': 'prompt-caching-2024-07-31'
             },
             body: JSON.stringify(claudeBody)
         });
