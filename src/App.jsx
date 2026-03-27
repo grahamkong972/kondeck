@@ -1153,11 +1153,11 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile, onUpdateProfile }) =
     const [count, setCount] = useState(10);
     const [activeTab, setActiveTab] = useState('notes');
     const fileInputRef = useRef(null);
+    const saveTimer = useRef(null);
+    const cancelRef = useRef(false);
     const [attachment, setAttachment] = useState(null);
-    const [manageMode, setManageMode] = useState(null); 
-    const [showExamSetup, setShowExamSetup] = useState(false); 
-    const [activeExamData, setActiveExamData] = useState(null);
-    const [examTimeLimit, setExamTimeLimit] = useState(0);
+    const [manageMode, setManageMode] = useState(null);
+    const [showExamSetup, setShowExamSetup] = useState(false);
 
     const [inputs, setInputs] = useState({ notes: "", transcript: "", slides: "" });
 
@@ -1177,7 +1177,9 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile, onUpdateProfile }) =
     const handleInputChange = (field, value) => {
         const newInputs = { ...inputs, [field]: value };
         setInputs(newInputs);
-        onUpdateDeck({ ...deck, ...newInputs });
+        // Debounce Firestore writes — one write per 800ms of idle typing
+        clearTimeout(saveTimer.current);
+        saveTimer.current = setTimeout(() => onUpdateDeck({ ...deck, ...newInputs }), 800);
     };
 
     const handleDeleteItem = (index) => {
@@ -1216,6 +1218,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile, onUpdateProfile }) =
         const hasAttachment = !!attachment;
         if (!hasText && !hasAttachment) return toast("Please add text or a file.");
 
+        cancelRef.current = false;
         setIsGenerating(true);
         setStatusMessage("Initializing...");
         const currentInputs = { ...inputs };
@@ -1249,6 +1252,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile, onUpdateProfile }) =
             let accumulatedResults = [];
 
             for (let i = 0; i < totalBatches; i++) {
+                if (cancelRef.current) break;
                 setStatusMessage(`Generating batch ${i + 1} of ${totalBatches}...`);
                 if (i > 0) await sleep(1000);
 
@@ -1418,13 +1422,11 @@ Return ONLY valid JSON: [{
                  saqs = validateAndFixData(Array.isArray(rawSAQ) ? rawSAQ : [rawSAQ], 'saq');
              }
              const finalExam = [...mcqs, ...saqs];
-             setExamTimeLimit(timeLimit);
-             setActiveExamData(finalExam);
+             if (finalExam.length === 0) throw new Error("Failed to generate exam questions.");
+             onUpdateDeck({ ...deck, exams: finalExam, examTimeLimit: timeLimit, mode: 'exam' });
              setShowExamSetup(false);
         } catch(e) { toast(e.message); } finally { setIsGenerating(false); setStatusMessage(""); }
     };
-
-    if (activeExamData) { return <ExamRunner questions={activeExamData} timeLimit={examTimeLimit} onBack={() => setActiveExamData(null)} userProfile={userProfile} />; }
     if (isGenerating && statusMessage.includes("Exam")) { return (<div className="h-full flex flex-col items-center justify-center"><RotateCw className="animate-spin text-indigo-600 mb-4" size={48} /><h3 className="text-xl font-bold text-slate-800">Generating Exam Paper...</h3><p className="text-slate-500">Creating custom questions for {deck.title}</p></div>) }
 
     return (
@@ -1454,6 +1456,7 @@ Return ONLY valid JSON: [{
                             <button onMouseEnter={() => setGenType('flashcards')} onClick={() => handleGenerate('flashcards')} disabled={isGenerating} className="flex-1 sm:flex-none bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 shadow-sm text-sm">{isGenerating && genType==='flashcards' ? <RotateCw className="animate-spin" size={16}/> : <Sparkles size={16}/>} {isGenerating && genType==='flashcards' ? statusMessage : 'Cards'}</button>
                             <button onMouseEnter={() => setGenType('mcq')} onClick={() => handleGenerate('mcq')} disabled={isGenerating} className="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 shadow-sm text-sm">{isGenerating && genType==='mcq' ? <RotateCw className="animate-spin" size={16}/> : <Brain size={16}/>} {isGenerating && genType==='mcq' ? statusMessage : 'Quiz'}</button>
                             <button onMouseEnter={() => setGenType('saq')} onClick={() => handleGenerate('saq')} disabled={isGenerating} className="flex-1 sm:flex-none bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 shadow-sm text-sm">{isGenerating && genType==='saq' ? <RotateCw className="animate-spin" size={16}/> : <PenTool size={16}/>} {isGenerating && genType==='saq' ? statusMessage : 'SAQ'}</button>
+                            {isGenerating && <button onClick={() => { cancelRef.current = true; }} className="px-3 py-2 bg-slate-200 hover:bg-red-100 hover:text-red-600 text-slate-500 font-bold rounded-lg transition text-sm flex items-center gap-1" title="Cancel generation"><X size={16}/></button>}
                         </div>
                     </div>
                 </div>
@@ -1741,7 +1744,7 @@ function AppInner() {
     const [activeId, setActiveId] = useState(null);
     const [showSettings, setShowSettings] = useState(false);
     const [nameModal, setNameModal] = useState({ isOpen: false, type: '', folder: null, value: '' });
-
+    const hasInitializedActiveId = useRef(false);
 
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -1752,10 +1755,11 @@ function AppInner() {
     }, []);
 
     useEffect(() => {
+        hasInitializedActiveId.current = false;
         if (!user) {
             setFolders([]);
             setDecks([]);
-            setUserProfile({ age: '', degree: '', subscription: { tier: 'free', credits: 180 } }); // Ensure default state for guest view
+            setUserProfile({ age: '', degree: '', subscription: { tier: 'free', credits: 180 } });
             setActiveId(null);
             return;
         }
@@ -1773,11 +1777,19 @@ function AppInner() {
                     degree: data.profile?.degree || '',
                     subscription: data.subscription || { tier: 'free', credits: 180 }
                 });
-                
-                if (!activeId && fetchedDecks.length > 0) {
-                    setActiveId(fetchedDecks[0].id);
-                    setViewMode('deck');
-                } else if (!activeId && fetchedFolders.length > 0) { setActiveId(fetchedFolders[0].id); setViewMode('folder'); }
+
+                // Only set the initial active item once per login — use a ref so the
+                // stale closure doesn't re-trigger this on every subsequent Firestore write.
+                if (!hasInitializedActiveId.current) {
+                    hasInitializedActiveId.current = true;
+                    if (fetchedDecks.length > 0) {
+                        setActiveId(fetchedDecks[0].id);
+                        setViewMode('deck');
+                    } else if (fetchedFolders.length > 0) {
+                        setActiveId(fetchedFolders[0].id);
+                        setViewMode('folder');
+                    }
+                }
             } else {
                 // This case is handled on signup, but as a fallback:
                 console.log("No user document found, creating one.");
@@ -1786,7 +1798,7 @@ function AppInner() {
         });
 
         return () => unsubscribe();
-    }, [user]); // activeId intentionally excluded - only initialize once
+    }, [user]);
 
     const updateFirestore = async (newData) => {
         if (!user) return;
@@ -1867,7 +1879,7 @@ function AppInner() {
                         {activeDeck.mode === 'flashcards' && <FlashcardStudy cards={activeDeck.cards || []} deck={activeDeck} onUpdateDeck={updateDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} />}
                         {/* Using 'quiz' mode for practice, 'exam' mode passes special prop */}
                         {activeDeck.mode === 'quiz' && <ExamRunner questions={activeDeck.quiz || []} deck={activeDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} userProfile={userProfile} practice={true} onRecordResult={(r) => updateDeck({...activeDeck, stats: {...(activeDeck.stats||{}), lastStudied: r.date, examHistory: [...((activeDeck.stats?.examHistory||[]).slice(-9)), r]}})} />}
-                        {activeDeck.mode === 'exam' && <ExamRunner questions={activeDeck.exams || []} deck={activeDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} userProfile={userProfile} onRecordResult={(r) => updateDeck({...activeDeck, stats: {...(activeDeck.stats||{}), lastStudied: r.date, examHistory: [...((activeDeck.stats?.examHistory||[]).slice(-9)), r]}})} />}
+                        {activeDeck.mode === 'exam' && <ExamRunner questions={activeDeck.exams || []} timeLimit={activeDeck.examTimeLimit || 0} deck={activeDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} userProfile={userProfile} onRecordResult={(r) => updateDeck({...activeDeck, stats: {...(activeDeck.stats||{}), lastStudied: r.date, examHistory: [...((activeDeck.stats?.examHistory||[]).slice(-9)), r]}})} />}
                         {activeDeck.mode === 'saq' && <SAQMode questions={activeDeck.saqs || []} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} userProfile={userProfile} />}
                     </>
                 )}
