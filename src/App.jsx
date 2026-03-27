@@ -45,19 +45,39 @@ const ToastContext = React.createContext(null);
 
 const ToastProvider = ({ children }) => {
     const [toasts, setToasts] = useState([]);
-    const toast = useCallback((message, type = 'error') => {
-        const id = Date.now() + Math.random();
-        setToasts(prev => [...prev, { id, message, type }]);
-        setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000);
+    const timers = useRef({});
+
+    const dismiss = useCallback((id) => {
+        clearTimeout(timers.current[id]);
+        delete timers.current[id];
+        setToasts(prev => prev.filter(t => t.id !== id));
     }, []);
+
+    // toast(message)                      → red error
+    // toast(message, 'success')           → green
+    // toast(message, 'info', undoFn)      → slate with Undo button (5s)
+    const toast = useCallback((message, type = 'error', onUndo = null) => {
+        const id = Date.now() + Math.random();
+        setToasts(prev => [...prev, { id, message, type, onUndo }]);
+        timers.current[id] = setTimeout(() => dismiss(id), onUndo ? 5000 : 4000);
+    }, [dismiss]);
+
+    const bgClass = (type) => type === 'error' ? 'bg-red-500' : type === 'success' ? 'bg-emerald-500' : 'bg-slate-800';
+    const Icon = (type) => type === 'error' ? <XCircle size={15} className="shrink-0" /> : <CheckCircle size={15} className="shrink-0" />;
+
     return (
         <ToastContext.Provider value={toast}>
             {children}
             <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none">
                 {toasts.map(t => (
-                    <div key={t.id} className={`flex items-center gap-2.5 px-4 py-3 rounded-xl shadow-lg text-white text-sm font-medium animate-fade-in-up pointer-events-auto max-w-sm ${t.type === 'error' ? 'bg-red-500' : 'bg-emerald-500'}`}>
-                        {t.type === 'error' ? <XCircle size={15} className="shrink-0" /> : <CheckCircle size={15} className="shrink-0" />}
-                        <span>{t.message}</span>
+                    <div key={t.id} className={`flex items-center gap-2.5 px-4 py-3 rounded-xl shadow-lg text-white text-sm font-medium animate-fade-in-up pointer-events-auto max-w-sm ${bgClass(t.type)}`}>
+                        {Icon(t.type)}
+                        <span className="flex-1">{t.message}</span>
+                        {t.onUndo && (
+                            <button onClick={() => { t.onUndo(); dismiss(t.id); }} className="ml-2 font-bold underline underline-offset-2 text-xs opacity-80 hover:opacity-100 shrink-0">
+                                Undo
+                            </button>
+                        )}
                     </div>
                 ))}
             </div>
@@ -66,6 +86,68 @@ const ToastProvider = ({ children }) => {
 };
 
 const useToast = () => React.useContext(ToastContext);
+
+// --- SHARED HELPERS ---
+
+// Maps UI type names to deck property keys
+const TYPE_KEY = { flashcards: 'cards', quiz: 'quiz', saq: 'saqs', exam: 'exams' };
+
+// Shared exam prompt builders (used by ModuleDashboard and FolderDashboard)
+const buildExamMCQPrompt = (count) => `Generate exactly ${count} multiple choice questions for a FINAL EXAM from the provided context.
+
+STRICT RULES:
+1. Every question must test a DIFFERENT concept. No rephrasing the same idea.
+2. Questions must be HARD — suitable for a final exam. Prioritise application, analysis, and scenario-based questions over pure recall.
+3. Vary the question TYPE:
+   - Scenario questions: describe a situation and ask what happens or what should be done
+   - Comparison questions: ask which option is correct given two similar concepts
+   - Misconception questions: include a plausible wrong answer that reflects a common misunderstanding
+   - Complexity questions: ask about time/space complexity with reasoning
+   - "What if" questions: change one condition and ask how the outcome changes
+4. DISTRACTOR RULES (wrong options):
+   - All wrong options must be PLAUSIBLE — no obviously silly distractors
+   - Wrong options should reflect real misconceptions students commonly hold
+   - All options should be similar in length and style
+   - Never make the correct answer obviously longer or more detailed
+5. Explanations must state why the correct answer is right AND why each wrong answer is wrong (briefly).
+6. Questions should not be answerable by elimination alone.
+
+Return ONLY valid JSON: [{"q": "...", "options": ["...", "...", "...", "..."], "a": 0, "exp": "..."}]
+Where "a" is the zero-based index of the correct option.`;
+
+const buildExamSAQPrompt = (count) => `Generate exactly ${count} short answer questions for a FINAL EXAM from the provided context.
+
+STRICT RULES:
+1. Every question must test a DIFFERENT concept. No rephrasing the same idea.
+2. Questions must require genuine understanding — suitable for a final exam. No pure recall.
+   Bad: "What does LIFO stand for?"
+   Good: "Explain why a Stack is described as LIFO, and give a real-world scenario where this property is essential."
+3. Vary the question TYPE:
+   - Explanation: "Explain why X behaves the way it does"
+   - Comparison: "Compare X and Y, including when you would choose one over the other"
+   - Analysis: "Given this scenario, identify the problem and suggest a solution"
+   - Justification: "Is X always better than Y? Justify your answer"
+   - Design: "How would you implement X to achieve Y property?"
+   - Trade-off: "What are the trade-offs of using X in this context?"
+4. Mark allocation rules:
+   - 2 marks: single focused concept, one clear explanation
+   - 3-4 marks: comparison, two distinct points, or an example required
+   - 5-6 marks: multi-part explanation, justification, or analysis required
+   - 7 marks: synthesis of multiple concepts or a full design answer required
+5. Model answers must directly address every part of the question, include key terms an examiner would look for, and be proportional to the mark value (roughly one key point per mark).
+
+Return ONLY valid JSON: [{"q": "...", "model": "...", "marks": 5}]`;
+
+// Relative date formatter for stats
+const formatRelativeDate = (ts) => {
+    if (!ts) return 'Never';
+    const diff = Date.now() - ts;
+    if (diff < 60000) return 'Just now';
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+    if (diff < 604800000) return `${Math.floor(diff / 86400000)}d ago`;
+    return new Date(ts).toLocaleDateString();
+};
 
 // --- UTILS ---
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -484,6 +566,11 @@ const NameModal = ({ isOpen, type, initialValue, onClose, onSave }) => {
 };
 
 const ManageModal = ({ type, items, onClose, onDeleteItem, onDeleteAll }) => {
+    const [search, setSearch] = useState('');
+    const filtered = search.trim()
+        ? items.map((item, i) => ({ item, i })).filter(({ item }) => item.q?.toLowerCase().includes(search.toLowerCase()))
+        : items.map((item, i) => ({ item, i }));
+
     return (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col">
@@ -494,32 +581,38 @@ const ManageModal = ({ type, items, onClose, onDeleteItem, onDeleteAll }) => {
                     </h3>
                     <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition"><X size={24}/></button>
                 </div>
+                <div className="px-4 pt-3 pb-1 border-b border-slate-100">
+                    <input
+                        type="text"
+                        value={search}
+                        onChange={e => setSearch(e.target.value)}
+                        placeholder="Search questions..."
+                        className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400 text-slate-700"
+                    />
+                </div>
                 <div className="flex-1 overflow-y-auto p-4 custom-scroll">
-                    {items.length === 0 ? <div className="text-center text-slate-400 py-12">No items to show.</div> : (
+                    {filtered.length === 0 ? <div className="text-center text-slate-400 py-12">{search ? 'No matches found.' : 'No items to show.'}</div> : (
                         <div className="space-y-2">
-                            {items.map((item, i) => {
-                                const status = type === 'flashcards' ? getCardStatus(item) : null;
-                                return (
-                                    <div key={i} className="flex items-start gap-3 p-3 bg-slate-50 rounded-lg border border-slate-100 group hover:border-slate-300 transition">
-                                        <div className="flex flex-col items-center gap-1 mt-1">
-                                            <span className="text-xs font-bold text-slate-400">{i + 1}.</span>
-                                            {type === 'flashcards' && item.nextReview && <div className={`w-2 h-2 rounded-full ${getCardStatus(item).color.replace('text-', 'bg-').split(' ')[0]}`} title={getCardStatus(item).label}></div>}
-                                        </div>
-                                        <div className="flex-1 text-sm text-slate-700">
-                                            <div className="font-medium mb-1 flex items-center gap-2"><FormattedText text={item.q} /></div>
-                                            <div className="text-xs text-slate-500 line-clamp-1 opacity-70">
-                                                {type === 'flashcards' ? <FormattedText text={item.a} /> : (type === 'saq' ? 'Model Answer Provided' : 'Multiple Choice')}
-                                            </div>
-                                        </div>
-                                        <button onClick={() => onDeleteItem(i)} className="text-slate-400 hover:text-red-500 p-1 opacity-0 group-hover:opacity-100 transition" title="Delete Item"><Trash2 size={16}/></button>
+                            {filtered.map(({ item, i }) => (
+                                <div key={i} className="flex items-start gap-3 p-3 bg-slate-50 rounded-lg border border-slate-100 group hover:border-slate-300 transition">
+                                    <div className="flex flex-col items-center gap-1 mt-1">
+                                        <span className="text-xs font-bold text-slate-400">{i + 1}.</span>
+                                        {type === 'flashcards' && item.nextReview && <div className={`w-2 h-2 rounded-full ${getCardStatus(item).color.replace('text-', 'bg-').split(' ')[0]}`} title={getCardStatus(item).label}></div>}
                                     </div>
-                                );
-                            })}
+                                    <div className="flex-1 text-sm text-slate-700">
+                                        <div className="font-medium mb-1"><FormattedText text={item.q} /></div>
+                                        <div className="text-xs text-slate-500 line-clamp-1 opacity-70">
+                                            {type === 'flashcards' ? <FormattedText text={item.a} /> : (type === 'saq' ? 'Model Answer Provided' : 'Multiple Choice')}
+                                        </div>
+                                    </div>
+                                    <button onClick={() => onDeleteItem(i)} className="text-slate-400 hover:text-red-500 p-1 opacity-0 group-hover:opacity-100 transition" title="Delete Item"><Trash2 size={16}/></button>
+                                </div>
+                            ))}
                         </div>
                     )}
                 </div>
                 <div className="p-4 border-t bg-slate-50 rounded-b-xl flex justify-between items-center">
-                    <span className="text-xs text-slate-500">{items.length} items total</span>
+                    <span className="text-xs text-slate-500">{filtered.length}{search ? ` of ${items.length}` : ''} items</span>
                     <button onClick={onDeleteAll} className="text-sm text-red-600 hover:text-red-800 font-medium flex items-center gap-2 px-4 py-2 hover:bg-red-50 rounded-lg transition"><Trash2 size={16}/> Delete All</button>
                 </div>
             </div>
@@ -602,7 +695,7 @@ const ExamSetupModal = ({ modules, onClose, onStartExam }) => {
 // --- NEW MODAL: UPGRADE MODAL ---
 
 // --- EXAM RUNNER ---
-const ExamRunner = ({ questions, timeLimit, onBack, userProfile, practice = false }) => {
+const ExamRunner = ({ questions, timeLimit, onBack, userProfile, practice = false, onRecordResult }) => {
     const toast = useToast();
     const [answers, setAnswers] = useState({});
     const [saqFeedback, setSaqFeedback] = useState({});
@@ -619,6 +712,14 @@ const ExamRunner = ({ questions, timeLimit, onBack, userProfile, practice = fals
             setSubmitted(true);
         }
     }, [submitted, timeLeft, practice]);
+
+    // Record result once when exam is submitted
+    useEffect(() => {
+        if (!submitted || !onRecordResult) return;
+        const mcqQs = questions.filter(q => q.type !== 'saq');
+        const score = mcqQs.reduce((acc, q) => answers[questions.indexOf(q)] === q.a ? acc + 1 : acc, 0);
+        onRecordResult({ date: Date.now(), score, maxScore: mcqQs.length, practice });
+    }, [submitted]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const formatTime = (s) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
 
@@ -869,7 +970,19 @@ const FlashcardStudy = ({ cards, onBack, onUpdateDeck, deck }) => {
         const nextReview = now + (intervalMinutes * 60 * 1000);
         const updatedCards = [...cards];
         const cardIndex = currentCard.originalIndex;
-        if (cardIndex !== undefined) { updatedCards[cardIndex] = { ...cards[cardIndex], nextReview }; onUpdateDeck({ ...deck, cards: updatedCards }); }
+        if (cardIndex !== undefined) {
+            updatedCards[cardIndex] = { ...cards[cardIndex], nextReview };
+            const prevStats = deck.stats || {};
+            onUpdateDeck({
+                ...deck,
+                cards: updatedCards,
+                stats: {
+                    ...prevStats,
+                    lastStudied: now,
+                    totalReviews: (prevStats.totalReviews || 0) + 1,
+                },
+            });
+        }
         let newQueue = dueQueue.slice(1);
         if (intervalMinutes < 10) { const insertPos = Math.min(newQueue.length, Math.floor(Math.random() * 3) + 1); newQueue.splice(insertPos, 0, { ...currentCard, nextReview, originalIndex: cardIndex }); }
         setFlipped(false); setAiHelp(null); setDueQueue(newQueue);
@@ -1068,18 +1181,19 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile, onUpdateProfile }) =
     };
 
     const handleDeleteItem = (index) => {
-        const key = manageMode === 'flashcards' ? 'cards' : (manageMode === 'quiz' ? 'quiz' : (manageMode === 'saq' ? 'saqs' : 'exams'));
-        const newItems = [...(deck[key] || [])];
-        newItems.splice(index, 1);
+        const key = TYPE_KEY[manageMode] || 'cards';
+        const prev = deck[key] || [];
+        const newItems = prev.filter((_, i) => i !== index);
         onUpdateDeck({ ...deck, [key]: newItems });
+        toast(`Deleted 1 item`, 'info', () => onUpdateDeck({ ...deck, [key]: prev }));
     };
 
     const handleDeleteAll = () => {
-        const key = manageMode === 'flashcards' ? 'cards' : (manageMode === 'quiz' ? 'quiz' : (manageMode === 'saq' ? 'saqs' : 'exams'));
-        if (confirm(`Delete ALL ${manageMode}? This cannot be undone.`)) {
-            onUpdateDeck({ ...deck, [key]: [] });
-            setManageMode(null);
-        }
+        const key = TYPE_KEY[manageMode] || 'cards';
+        const prev = deck[key] || [];
+        onUpdateDeck({ ...deck, [key]: [] });
+        setManageMode(null);
+        toast(`Deleted all ${manageMode}`, 'info', () => onUpdateDeck({ ...deck, [key]: prev }));
     };
 
     const handleFileUpload = async (e) => {
@@ -1295,55 +1409,12 @@ Return ONLY valid JSON: [{
              const combinedContext = `MODULE: ${deck.title}\nNOTES: ${currentInputs.notes}\nTRANSCRIPT: ${currentInputs.transcript}\nSLIDES TEXT: ${currentInputs.slides}`;
              let mcqs = [];
              if(numMCQs > 0) {
-                 const promptMCQ = `Generate exactly ${numMCQs} multiple choice questions for a FINAL EXAM from the provided context.
-
-STRICT RULES:
-1. Every question must test a DIFFERENT concept. No rephrasing the same idea.
-2. Questions must be HARD — suitable for a final exam. Prioritise application, analysis, and scenario-based questions over pure recall.
-3. Vary the question TYPE:
-   - Scenario questions: describe a situation and ask what happens or what should be done
-   - Comparison questions: ask which option is correct given two similar concepts
-   - Misconception questions: include a plausible wrong answer that reflects a common misunderstanding
-   - Complexity questions: ask about time/space complexity with reasoning
-   - "What if" questions: change one condition and ask how the outcome changes
-4. DISTRACTOR RULES (wrong options):
-   - All wrong options must be PLAUSIBLE — no obviously silly distractors
-   - Wrong options should reflect real misconceptions students commonly hold
-   - All options should be similar in length and style
-   - Never make the correct answer obviously longer or more detailed
-5. Explanations must state why the correct answer is right AND why each wrong answer is wrong (briefly).
-6. Questions should not be answerable by elimination alone.
-
-Return ONLY valid JSON: [{"q": "...", "options": ["...", "...", "...", "..."], "a": 0, "exp": "..."}]
-Where "a" is the zero-based index of the correct option.`;
-                 const rawMCQ = await generateContent(promptMCQ, combinedContext, "", null, numMCQs);
+                 const rawMCQ = await generateContent(buildExamMCQPrompt(numMCQs), combinedContext, "", null, numMCQs);
                  mcqs = validateAndFixData(Array.isArray(rawMCQ) ? rawMCQ : [rawMCQ], 'mcq');
             }
              let saqs = [];
              if(numSAQs > 0) {
-                 const promptSAQ = `Generate exactly ${numSAQs} short answer questions for a FINAL EXAM from the provided context.
-
-STRICT RULES:
-1. Every question must test a DIFFERENT concept. No rephrasing the same idea.
-2. Questions must require genuine understanding — suitable for a final exam. No pure recall.
-   Bad: "What does LIFO stand for?"
-   Good: "Explain why a Stack is described as LIFO, and give a real-world scenario where this property is essential."
-3. Vary the question TYPE:
-   - Explanation: "Explain why X behaves the way it does"
-   - Comparison: "Compare X and Y, including when you would choose one over the other"
-   - Analysis: "Given this scenario, identify the problem and suggest a solution"
-   - Justification: "Is X always better than Y? Justify your answer"
-   - Design: "How would you implement X to achieve Y property?"
-   - Trade-off: "What are the trade-offs of using X in this context?"
-4. Mark allocation rules:
-   - 2 marks: single focused concept, one clear explanation
-   - 3-4 marks: comparison, two distinct points, or an example required
-   - 5-6 marks: multi-part explanation, justification, or analysis required
-   - 7 marks: synthesis of multiple concepts or a full design answer required
-5. Model answers must directly address every part of the question, include key terms an examiner would look for, and be proportional to the mark value (roughly one key point per mark).
-
-Return ONLY valid JSON: [{"q": "...", "model": "...", "marks": 5}]`;
-                 const rawSAQ = await generateContent(promptSAQ, combinedContext, "", null, numSAQs);
+                 const rawSAQ = await generateContent(buildExamSAQPrompt(numSAQs), combinedContext, "", null, numSAQs);
                  saqs = validateAndFixData(Array.isArray(rawSAQ) ? rawSAQ : [rawSAQ], 'saq');
              }
              const finalExam = [...mcqs, ...saqs];
@@ -1387,26 +1458,87 @@ Return ONLY valid JSON: [{"q": "...", "model": "...", "marks": 5}]`;
                     </div>
                 </div>
                 <div className="lg:col-span-4 space-y-6">
-                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                        <h3 className="font-semibold text-slate-700 mb-4 flex items-center gap-2"><Brain size={18}/> Stats</h3>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-100 flex flex-col items-center justify-center text-center relative group">
-                                <button onClick={() => setManageMode('flashcards')} className="absolute top-2 right-2 text-indigo-300 hover:text-indigo-600 opacity-0 group-hover:opacity-100 transition p-1" title="Manage Flashcards"><Edit3 size={14}/></button>
-                                <div className="text-3xl font-bold text-indigo-600 mb-1">{deck.cards?.length || 0}</div>
-                                <div className="text-xs text-indigo-400 font-bold uppercase">Cards</div>
+                    {/* --- STATS PANEL --- */}
+                    {(() => {
+                        const now = Date.now();
+                        const threeDays = 3 * 24 * 60 * 60 * 1000;
+                        const cards = deck.cards || [];
+                        const mastered = cards.filter(c => c.nextReview && c.nextReview > now + threeDays).length;
+                        const due = cards.filter(c => !c.nextReview || c.nextReview <= now).length;
+                        const learning = cards.length - mastered - due;
+                        const stats = deck.stats || {};
+                        const examHistory = stats.examHistory || [];
+                        return (
+                        <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 space-y-4">
+                            <h3 className="font-semibold text-slate-700 flex items-center gap-2"><PieChart size={16}/> Study Stats</h3>
+                            {/* Card breakdown */}
+                            <div className="grid grid-cols-3 gap-2 text-center">
+                                <div className="bg-slate-50 rounded-lg p-2 border border-slate-100 relative group">
+                                    <button onClick={() => setManageMode('flashcards')} className="absolute top-1 right-1 text-slate-300 hover:text-slate-500 opacity-0 group-hover:opacity-100 transition" title="Manage"><Edit3 size={11}/></button>
+                                    <div className="text-xl font-bold text-indigo-600">{cards.length}</div>
+                                    <div className="text-[10px] text-slate-400 font-bold uppercase">Total</div>
+                                </div>
+                                <div className="bg-emerald-50 rounded-lg p-2 border border-emerald-100">
+                                    <div className="text-xl font-bold text-emerald-600">{mastered}</div>
+                                    <div className="text-[10px] text-emerald-400 font-bold uppercase">Mastered</div>
+                                </div>
+                                <div className="bg-amber-50 rounded-lg p-2 border border-amber-100">
+                                    <div className="text-xl font-bold text-amber-600">{due}</div>
+                                    <div className="text-[10px] text-amber-400 font-bold uppercase">Due</div>
+                                </div>
                             </div>
-                            <div className="bg-emerald-50 p-4 rounded-lg border border-emerald-100 flex flex-col items-center justify-center text-center relative group">
-                                <button onClick={() => setManageMode('quiz')} className="absolute top-2 right-2 text-emerald-300 hover:text-emerald-600 opacity-0 group-hover:opacity-100 transition p-1" title="Manage Questions"><Edit3 size={14}/></button>
-                                <div className="text-3xl font-bold text-emerald-600 mb-1">{deck.quiz?.length || 0}</div>
-                                <div className="text-xs text-emerald-400 font-bold uppercase">Practice</div>
+                            {/* Progress bar */}
+                            {cards.length > 0 && (
+                                <div className="space-y-1">
+                                    <div className="flex h-2 rounded-full overflow-hidden bg-slate-100">
+                                        <div className="bg-emerald-400 transition-all" style={{ width: `${(mastered / cards.length) * 100}%` }} title={`${mastered} mastered`} />
+                                        <div className="bg-indigo-300 transition-all" style={{ width: `${(learning / cards.length) * 100}%` }} title={`${learning} learning`} />
+                                        <div className="bg-amber-300 transition-all" style={{ width: `${(due / cards.length) * 100}%` }} title={`${due} due`} />
+                                    </div>
+                                    <div className="flex gap-3 text-[10px] text-slate-400">
+                                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-400 inline-block"/>Mastered</span>
+                                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-indigo-300 inline-block"/>Learning</span>
+                                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-300 inline-block"/>Due</span>
+                                    </div>
+                                </div>
+                            )}
+                            {/* Other counts */}
+                            <div className="flex gap-2 text-center">
+                                <div className="flex-1 bg-emerald-50 rounded-lg p-2 border border-emerald-100 relative group">
+                                    <button onClick={() => setManageMode('quiz')} className="absolute top-1 right-1 text-slate-300 hover:text-slate-500 opacity-0 group-hover:opacity-100 transition" title="Manage"><Edit3 size={11}/></button>
+                                    <div className="text-lg font-bold text-emerald-600">{deck.quiz?.length || 0}</div>
+                                    <div className="text-[10px] text-emerald-400 font-bold uppercase">MCQs</div>
+                                </div>
+                                <div className="flex-1 bg-purple-50 rounded-lg p-2 border border-purple-100 relative group">
+                                    <button onClick={() => setManageMode('saq')} className="absolute top-1 right-1 text-slate-300 hover:text-slate-500 opacity-0 group-hover:opacity-100 transition" title="Manage"><Edit3 size={11}/></button>
+                                    <div className="text-lg font-bold text-purple-600">{deck.saqs?.length || 0}</div>
+                                    <div className="text-[10px] text-purple-400 font-bold uppercase">SAQs</div>
+                                </div>
                             </div>
-                            <div className="bg-purple-50 p-4 rounded-lg border border-purple-100 flex flex-col items-center justify-center text-center relative group col-span-2">
-                                <button onClick={() => setManageMode('saq')} className="absolute top-2 right-2 text-purple-300 hover:text-purple-600 opacity-0 group-hover:opacity-100 transition p-1" title="Manage SAQs"><Edit3 size={14}/></button>
-                                <div className="text-3xl font-bold text-purple-600 mb-1">{deck.saqs?.length || 0}</div>
-                                <div className="text-xs text-purple-400 font-bold uppercase">SAQs</div>
+                            {/* Last studied + total reviews */}
+                            <div className="flex justify-between text-xs text-slate-400 pt-1 border-t border-slate-100">
+                                <span>Last studied: <span className="font-medium text-slate-600">{formatRelativeDate(stats.lastStudied)}</span></span>
+                                <span>{stats.totalReviews || 0} reviews</span>
                             </div>
+                            {/* Recent exam scores */}
+                            {examHistory.length > 0 && (
+                                <div className="pt-1 border-t border-slate-100">
+                                    <div className="text-xs font-semibold text-slate-500 mb-2">Recent Exam Scores</div>
+                                    <div className="space-y-1">
+                                        {examHistory.slice(-5).reverse().map((e, i) => (
+                                            <div key={i} className="flex justify-between items-center text-xs">
+                                                <span className="text-slate-400">{new Date(e.date).toLocaleDateString()} {e.practice ? '(practice)' : ''}</span>
+                                                <span className={`font-bold ${e.maxScore > 0 && e.score / e.maxScore >= 0.7 ? 'text-emerald-600' : 'text-red-500'}`}>
+                                                    {e.maxScore > 0 ? `${e.score}/${e.maxScore}` : '—'}
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                         </div>
-                    </div>
+                        );
+                    })()}
                     <div className="space-y-3">
                         <div className="bg-white p-4 rounded-xl border border-slate-200">
                              <div className="flex justify-between items-center mb-3">
@@ -1463,7 +1595,7 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, userProf
         } finally { setIsAnalyzing(false); }
     };
 
-    const globalCards = decks.flatMap(d => (d.cards || []).map(c => ({...c, _deckId: d.id})));
+    const globalCards = useMemo(() => decks.flatMap(d => (d.cards || []).map(c => ({...c, _deckId: d.id}))), [decks]);
 
     const handleGlobalUpdate = (updatedGlobalDeck) => {
         const cardsByDeck = {};
@@ -1484,56 +1616,13 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, userProf
             
             let mcqs = [];
             if(numMCQs > 0) {
-                 const promptMCQ = `Generate exactly ${numMCQs} multiple choice questions for a FINAL EXAM from the provided context.
-
-STRICT RULES:
-1. Every question must test a DIFFERENT concept. No rephrasing the same idea.
-2. Questions must be HARD — suitable for a final exam. Prioritise application, analysis, and scenario-based questions over pure recall.
-3. Vary the question TYPE:
-   - Scenario questions: describe a situation and ask what happens or what should be done
-   - Comparison questions: ask which option is correct given two similar concepts
-   - Misconception questions: include a plausible wrong answer that reflects a common misunderstanding
-   - Complexity questions: ask about time/space complexity with reasoning
-   - "What if" questions: change one condition and ask how the outcome changes
-4. DISTRACTOR RULES (wrong options):
-   - All wrong options must be PLAUSIBLE — no obviously silly distractors
-   - Wrong options should reflect real misconceptions students commonly hold
-   - All options should be similar in length and style
-   - Never make the correct answer obviously longer or more detailed
-5. Explanations must state why the correct answer is right AND why each wrong answer is wrong (briefly).
-6. Questions should not be answerable by elimination alone.
-
-Return ONLY valid JSON: [{"q": "...", "options": ["...", "...", "...", "..."], "a": 0, "exp": "..."}]
-Where "a" is the zero-based index of the correct option.`;
-                 const rawMCQ = await generateContent(promptMCQ, combinedContext, "", null, numMCQs);
+                 const rawMCQ = await generateContent(buildExamMCQPrompt(numMCQs), combinedContext, "", null, numMCQs);
                  mcqs = validateAndFixData(Array.isArray(rawMCQ) ? rawMCQ : [rawMCQ], 'mcq');
             }
 
             let saqs = [];
             if(numSAQs > 0) {
-                 const promptSAQ = `Generate exactly ${numSAQs} short answer questions for a FINAL EXAM from the provided context.
-
-STRICT RULES:
-1. Every question must test a DIFFERENT concept. No rephrasing the same idea.
-2. Questions must require genuine understanding — suitable for a final exam. No pure recall.
-   Bad: "What does LIFO stand for?"
-   Good: "Explain why a Stack is described as LIFO, and give a real-world scenario where this property is essential."
-3. Vary the question TYPE:
-   - Explanation: "Explain why X behaves the way it does"
-   - Comparison: "Compare X and Y, including when you would choose one over the other"
-   - Analysis: "Given this scenario, identify the problem and suggest a solution"
-   - Justification: "Is X always better than Y? Justify your answer"
-   - Design: "How would you implement X to achieve Y property?"
-   - Trade-off: "What are the trade-offs of using X in this context?"
-4. Mark allocation rules:
-   - 2 marks: single focused concept, one clear explanation
-   - 3-4 marks: comparison, two distinct points, or an example required
-   - 5-6 marks: multi-part explanation, justification, or analysis required
-   - 7 marks: synthesis of multiple concepts or a full design answer required
-5. Model answers must directly address every part of the question, include key terms an examiner would look for, and be proportional to the mark value (roughly one key point per mark).
-
-Return ONLY valid JSON: [{"q": "...", "model": "...", "marks": 5}]`;
-                 const rawSAQ = await generateContent(promptSAQ, combinedContext, "", null, numSAQs);
+                 const rawSAQ = await generateContent(buildExamSAQPrompt(numSAQs), combinedContext, "", null, numSAQs);
                  saqs = validateAndFixData(Array.isArray(rawSAQ) ? rawSAQ : [rawSAQ], 'saq');
             }
             
@@ -1641,7 +1730,8 @@ Return ONLY valid JSON: [{"q": "...", "model": "...", "marks": 5}]`;
 };
 
 // --- APP MAIN ---
-export default function App() {
+function AppInner() {
+    const toast = useToast();
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
     const [folders, setFolders] = useState([]);
@@ -1710,14 +1800,27 @@ export default function App() {
     const updateDeck = (d) => updateFirestore({ decks: decks.map(x => x.id === d.id ? d : x) });
     const updateFolder = (f) => updateFirestore({ folders: folders.map(x => x.id === f.id ? f : x) });
     const updateProfile = (p) => { setUserProfile(p); updateFirestore({ profile: { age: p.age, degree: p.degree }, subscription: p.subscription }); };
-    const deleteFolder = (id) => { if(confirm("Delete folder?")) { const newDecks = decks.filter(d => d.folderId !== id); const newFolders = folders.filter(f => f.id !== id); updateFirestore({ decks: newDecks, folders: newFolders }); setActiveId(null); }};
+    const deleteFolder = (id) => {
+        const prevDecks = decks; const prevFolders = folders;
+        const newDecks = decks.filter(d => d.folderId !== id);
+        const newFolders = folders.filter(f => f.id !== id);
+        updateFirestore({ decks: newDecks, folders: newFolders });
+        setActiveId(null);
+        toast(`Folder deleted`, 'info', () => { updateFirestore({ decks: prevDecks, folders: prevFolders }); setActiveId(id); });
+    };
     const addDeck = (fid) => { 
         const nid = Date.now(); 
         updateFirestore({ decks: [...decks, { id: nid, folderId: fid, title: 'New Module', mode: 'dashboard' }] }); 
         setViewMode('deck'); 
         setActiveId(nid); 
     };
-    const deleteDeck = (id) => { if(confirm("Delete module?")) { const rem = decks.filter(d => d.id !== id); updateFirestore({ decks: rem }); if(activeId === id) setActiveId(rem[0]?.id || null); }};
+    const deleteDeck = (id) => {
+        const prevDecks = decks;
+        const rem = decks.filter(d => d.id !== id);
+        updateFirestore({ decks: rem });
+        if(activeId === id) setActiveId(rem[0]?.id || null);
+        toast(`Module deleted`, 'info', () => updateFirestore({ decks: prevDecks }));
+    };
     
     const openRenameFolder = (folder) => setNameModal({ isOpen: true, type: 'rename', folder: folder, value: folder.name });
     const handleSaveName = (name) => {
@@ -1746,7 +1849,6 @@ export default function App() {
     }
 
     return (
-        <ToastProvider>
         <div className="flex h-screen bg-[#f8fafc] font-sans text-slate-900">
             <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
             <Sidebar 
@@ -1764,8 +1866,8 @@ export default function App() {
                         {activeDeck.mode === 'dashboard' && <ModuleDashboard deck={activeDeck} onUpdateDeck={updateDeck} userProfile={userProfile} onUpdateProfile={updateProfile} />}
                         {activeDeck.mode === 'flashcards' && <FlashcardStudy cards={activeDeck.cards || []} deck={activeDeck} onUpdateDeck={updateDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} />}
                         {/* Using 'quiz' mode for practice, 'exam' mode passes special prop */}
-                        {activeDeck.mode === 'quiz' && <ExamRunner questions={activeDeck.quiz || []} deck={activeDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} userProfile={userProfile} practice={true} />}
-                        {activeDeck.mode === 'exam' && <ExamRunner questions={activeDeck.exams || []} deck={activeDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} userProfile={userProfile} />}
+                        {activeDeck.mode === 'quiz' && <ExamRunner questions={activeDeck.quiz || []} deck={activeDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} userProfile={userProfile} practice={true} onRecordResult={(r) => updateDeck({...activeDeck, stats: {...(activeDeck.stats||{}), lastStudied: r.date, examHistory: [...((activeDeck.stats?.examHistory||[]).slice(-9)), r]}})} />}
+                        {activeDeck.mode === 'exam' && <ExamRunner questions={activeDeck.exams || []} deck={activeDeck} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} userProfile={userProfile} onRecordResult={(r) => updateDeck({...activeDeck, stats: {...(activeDeck.stats||{}), lastStudied: r.date, examHistory: [...((activeDeck.stats?.examHistory||[]).slice(-9)), r]}})} />}
                         {activeDeck.mode === 'saq' && <SAQMode questions={activeDeck.saqs || []} onBack={() => updateDeck({...activeDeck, mode: 'dashboard'})} userProfile={userProfile} />}
                     </>
                 )}
@@ -1822,6 +1924,9 @@ export default function App() {
                 </div>
             )}
         </div>
-        </ToastProvider>
     );
+}
+
+export default function App() {
+    return <ToastProvider><AppInner /></ToastProvider>;
 }
