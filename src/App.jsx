@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { 
-    BookOpen, Brain, ChevronLeft, ChevronRight, Settings, 
-    Plus, Trash2, GraduationCap, FileText, Sparkles, 
+    BookOpen, Brain, ChevronLeft, ChevronRight, Settings,
+    Plus, Trash2, GraduationCap, FileText, Sparkles,
     RotateCw, CheckCircle, XCircle, Folder, ChevronDown,
     Mic, Presentation, BookOpenText, PieChart, AlertCircle,
     LayoutDashboard, Image as ImageIcon, X, FileType, LogOut, Lock, Mail, Edit3, Edit2,
-    Clock, Layers, Zap, Tag, Hash, Timer, FileQuestion, PenTool, CheckSquare, Sliders, Check
+    Clock, Layers, Zap, Tag, Hash, Timer, FileQuestion, PenTool, CheckSquare, Sliders, Check,
+    ClipboardPaste
 } from 'lucide-react';
 
 // --- FIREBASE IMPORTS ---
@@ -560,6 +561,188 @@ const NameModal = ({ isOpen, type, initialValue, onClose, onSave }) => {
                         <button type="submit" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition text-sm font-bold">Save</button>
                     </div>
                 </form>
+            </div>
+        </div>
+    );
+};
+
+// --- PASTE IMPORT PARSER ---
+const parsePastedCards = (text, type) => {
+    const trimmed = text.trim();
+
+    // JSON path — detect array or object
+    if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+        try {
+            const parsed = JSON.parse(trimmed.startsWith('{') ? `[${trimmed}]` : trimmed);
+            if (!Array.isArray(parsed)) throw new Error("Expected a JSON array.");
+            if (type === 'flashcards') {
+                return parsed.map((c, i) => {
+                    if (!c.q || !c.a) throw new Error(`Item ${i + 1}: missing "q" or "a".`);
+                    return { q: String(c.q).trim(), a: String(c.a).trim(), id: `paste-${Date.now()}-${i}` };
+                });
+            }
+            if (type === 'quiz') {
+                return parsed.map((c, i) => {
+                    if (!c.q || !Array.isArray(c.options) || c.a == null) throw new Error(`Item ${i + 1}: missing "q", "options", or "a".`);
+                    return { type: 'mcq', q: String(c.q).trim(), options: c.options.map(String), a: Number(c.a), exp: c.exp ? String(c.exp).trim() : '' };
+                });
+            }
+            if (type === 'saq') {
+                return parsed.map((c, i) => {
+                    if (!c.q || !c.model) throw new Error(`Item ${i + 1}: missing "q" or "model".`);
+                    return { type: 'saq', q: String(c.q).trim(), model: String(c.model).trim(), marks: Number(c.marks) || 4 };
+                });
+            }
+        } catch (e) {
+            throw new Error("JSON parse error: " + e.message);
+        }
+    }
+
+    // Plain-text path — split blocks on blank lines
+    const blocks = trimmed.split(/\n\s*\n/).map(b => b.trim()).filter(Boolean);
+    if (blocks.length === 0) throw new Error("No cards found. Check the format.");
+
+    if (type === 'flashcards') {
+        return blocks.map((block, i) => {
+            const qMatch = block.match(/^Q:\s*(.+)/im);
+            const aMatch = block.match(/^A:\s*([\s\S]+)/im);
+            if (!qMatch || !aMatch) throw new Error(`Block ${i + 1}: expected "Q:" and "A:" lines.`);
+            return { q: qMatch[1].trim(), a: aMatch[1].trim(), id: `paste-${Date.now()}-${i}` };
+        });
+    }
+
+    if (type === 'quiz') {
+        return blocks.map((block, i) => {
+            const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
+            const qLine = lines.find(l => /^Q:/i.test(l));
+            const optA = lines.find(l => /^A[\)\.]/i.test(l));
+            const optB = lines.find(l => /^B[\)\.]/i.test(l));
+            const optC = lines.find(l => /^C[\)\.]/i.test(l));
+            const optD = lines.find(l => /^D[\)\.]/i.test(l));
+            const ansLine = lines.find(l => /^ANS:/i.test(l));
+            const expLine = lines.find(l => /^EXP:/i.test(l));
+            if (!qLine || !optA || !optB || !ansLine) throw new Error(`Block ${i + 1}: expected Q:, A), B), and ANS: lines.`);
+            const q = qLine.replace(/^Q:\s*/i, '').trim();
+            const options = [optA, optB, optC, optD].filter(Boolean).map(l => l.replace(/^[A-D][\)\.]\s*/i, '').trim());
+            const ansLetter = ansLine.replace(/^ANS:\s*/i, '').trim().toUpperCase();
+            const ansIndex = ['A','B','C','D'].indexOf(ansLetter);
+            if (ansIndex === -1) throw new Error(`Block ${i + 1}: ANS must be A, B, C, or D.`);
+            return { type: 'mcq', q, options, a: ansIndex, exp: expLine ? expLine.replace(/^EXP:\s*/i, '').trim() : '' };
+        });
+    }
+
+    if (type === 'saq') {
+        return blocks.map((block, i) => {
+            const qMatch = block.match(/^Q:\s*(.+)/im);
+            const modelMatch = block.match(/^MODEL:\s*([\s\S]+?)(?=\nMARKS:|$)/im);
+            const marksMatch = block.match(/^MARKS:\s*(\d+)/im);
+            if (!qMatch || !modelMatch) throw new Error(`Block ${i + 1}: expected "Q:" and "MODEL:" lines.`);
+            return { type: 'saq', q: qMatch[1].trim(), model: modelMatch[1].trim(), marks: marksMatch ? Number(marksMatch[1]) : 4 };
+        });
+    }
+
+    throw new Error("Unknown type.");
+};
+
+const FORMAT_HINTS = {
+    flashcards: `Q: What is X?\nA: X is...\n\nQ: What is Y?\nA: Y is...\n\nOr paste a JSON array:\n[{"q": "...", "a": "..."}]`,
+    quiz: `Q: Which of the following is correct?\nA) Option one\nB) Option two\nC) Option three\nD) Option four\nANS: B\nEXP: Because...\n\nOr JSON: [{"q":"...","options":["...","...","...","..."],"a":1,"exp":"..."}]`,
+    saq: `Q: Explain the concept of X.\nMODEL: X is important because...\nMARKS: 4\n\nOr JSON: [{"q":"...","model":"...","marks":4}]`,
+};
+
+const PasteImportModal = ({ onClose, onImport, initialType = 'flashcards' }) => {
+    const [type, setType] = useState(initialType);
+    const [text, setText] = useState('');
+    const [error, setError] = useState('');
+    const [preview, setPreview] = useState(null);
+
+    const handleParse = () => {
+        setError('');
+        setPreview(null);
+        try {
+            const cards = parsePastedCards(text, type);
+            if (cards.length === 0) { setError('No cards found.'); return; }
+            setPreview(cards);
+        } catch (e) {
+            setError(e.message);
+        }
+    };
+
+    const handleImport = () => {
+        if (!preview) return;
+        onImport(type, preview);
+        onClose();
+    };
+
+    const typeConfig = {
+        flashcards: { label: 'Flashcards', icon: <BookOpen size={14}/>, activeClass: 'border-indigo-500 text-indigo-600 bg-indigo-50/50' },
+        quiz:       { label: 'Quiz (MCQ)', icon: <Brain size={14}/>,    activeClass: 'border-emerald-500 text-emerald-600 bg-emerald-50/50' },
+        saq:        { label: 'SAQ',        icon: <PenTool size={14}/>,  activeClass: 'border-purple-500 text-purple-600 bg-purple-50/50' },
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+                <div className="flex justify-between items-center p-6 border-b">
+                    <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
+                        <ClipboardPaste size={20} className="text-indigo-500"/> Paste &amp; Import Cards
+                    </h3>
+                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition"><X size={24}/></button>
+                </div>
+
+                {/* Type tabs */}
+                <div className="flex border-b border-slate-200 bg-slate-50/50">
+                    {Object.entries(typeConfig).map(([key, c]) => (
+                        <button key={key} onClick={() => { setType(key); setText(''); setPreview(null); setError(''); }}
+                            className={`flex items-center gap-2 px-5 py-3 text-sm font-medium border-b-2 transition-colors ${type === key ? c.activeClass : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+                            {c.icon} {c.label}
+                        </button>
+                    ))}
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-5 space-y-4 custom-scroll">
+                    {/* Format hint */}
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                        <div className="text-[11px] font-bold text-slate-400 uppercase mb-1.5">Format</div>
+                        <pre className="text-xs text-slate-500 whitespace-pre-wrap font-mono">{FORMAT_HINTS[type]}</pre>
+                    </div>
+
+                    <textarea
+                        className="w-full h-52 p-3 text-sm font-mono bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400 text-slate-700 resize-none"
+                        placeholder="Paste your cards here..."
+                        value={text}
+                        onChange={e => { setText(e.target.value); setPreview(null); setError(''); }}
+                    />
+
+                    {error && (
+                        <div className="flex items-start gap-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                            <AlertCircle size={15} className="shrink-0 mt-0.5"/> {error}
+                        </div>
+                    )}
+
+                    {preview && (
+                        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                            <div className="text-xs font-bold text-emerald-700 mb-2 flex items-center gap-1">
+                                <CheckCircle size={13}/> {preview.length} card{preview.length !== 1 ? 's' : ''} ready to import
+                            </div>
+                            <div className="space-y-1 max-h-36 overflow-y-auto custom-scroll">
+                                {preview.map((c, i) => (
+                                    <div key={i} className="text-xs text-emerald-800 bg-white rounded px-2 py-1 border border-emerald-100 truncate">
+                                        {i + 1}. {c.q}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                <div className="p-4 border-t bg-slate-50 rounded-b-xl flex justify-end gap-2">
+                    <button onClick={onClose} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition text-sm">Cancel</button>
+                    {!preview
+                        ? <button onClick={handleParse} disabled={!text.trim()} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition text-sm disabled:opacity-50 flex items-center gap-2"><ClipboardPaste size={15}/> Parse</button>
+                        : <button onClick={handleImport} className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg transition text-sm flex items-center gap-2"><CheckCircle size={15}/> Import {preview.length} Card{preview.length !== 1 ? 's' : ''}</button>
+                    }
+                </div>
             </div>
         </div>
     );
@@ -1158,6 +1341,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile, onUpdateProfile }) =
     const [attachment, setAttachment] = useState(null);
     const [manageMode, setManageMode] = useState(null);
     const [showExamSetup, setShowExamSetup] = useState(false);
+    const [pasteMode, setPasteMode] = useState(null); // null | 'flashcards' | 'quiz' | 'saq'
 
     const [inputs, setInputs] = useState({ notes: "", transcript: "", slides: "" });
 
@@ -1209,6 +1393,13 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile, onUpdateProfile }) =
         } else if (file.type === 'application/pdf') {
             setAttachment({ type: 'pdf', name: file.name, file });
         }
+    };
+
+    const handlePasteImport = (type, newCards) => {
+        const key = TYPE_KEY[type] || 'cards';
+        const existing = deck[key] || [];
+        onUpdateDeck({ ...deck, [key]: [...existing, ...newCards] });
+        toast(`Added ${newCards.length} ${type === 'flashcards' ? 'flashcard' : type === 'quiz' ? 'MCQ' : 'SAQ'}${newCards.length !== 1 ? 's' : ''}`, 'success');
     };
 
     const toggleStudyMode = (mode) => { onUpdateDeck({ ...deck, studyMode: mode }); };
@@ -1449,6 +1640,7 @@ Return ONLY valid JSON: [{
                     <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row gap-4 items-center justify-between">
                         <div className="flex gap-4 text-sm text-slate-600 items-center">
                             <div className="relative"><input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*,application/pdf" className="hidden" /><button onClick={() => fileInputRef.current?.click()} className={`p-2 rounded-lg border transition flex items-center gap-2 ${attachment ? 'bg-indigo-50 border-indigo-200 text-indigo-600' : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-100'}`} title="Upload Slide Image or PDF">{attachment ? (attachment.type === 'pdf' ? <FileType size={18}/> : <ImageIcon size={18}/>) : <Plus size={18}/>} {attachment ? (attachment.type === 'pdf' ? "PDF" : "Image") : "File"}</button></div>
+                            <button onClick={() => setPasteMode('flashcards')} className="p-2 rounded-lg border bg-white border-slate-300 text-slate-600 hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-600 transition flex items-center gap-2" title="Paste / Import your own cards"><ClipboardPaste size={18}/> Paste</button>
                             <div className="h-6 w-px bg-slate-300 mx-2 hidden sm:block"></div>
                             <div className="flex items-center gap-2"><span className="font-medium text-slate-500">Count:</span><div className="relative flex items-center"><Hash size={14} className="absolute left-2.5 text-slate-400 pointer-events-none"/><input type="number" min="1" max="50" value={count} onChange={(e) => setCount(Number(e.target.value))} className="w-20 pl-8 pr-2 py-1.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none text-slate-700 font-medium"/></div></div>                            
                         </div>
@@ -1563,6 +1755,7 @@ Return ONLY valid JSON: [{
                 </div>
             </div>
             {manageMode && <ManageModal type={manageMode} items={manageMode === 'flashcards' ? (deck.cards || []) : (manageMode === 'quiz' ? (deck.quiz || []) : (manageMode === 'saq' ? (deck.saqs || []) : (deck.exams || [])))} onClose={() => setManageMode(null)} onDeleteItem={handleDeleteItem} onDeleteAll={handleDeleteAll} />}
+            {pasteMode && <PasteImportModal initialType={pasteMode} onClose={() => setPasteMode(null)} onImport={handlePasteImport} />}
         </div>
     );
 };
