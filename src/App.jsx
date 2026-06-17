@@ -1412,7 +1412,16 @@ const AnalysisModal = ({ analysis, type, count, onConfirm, onClose }) => {
     const thinAreas = Array.isArray(analysis?.thinAreas) ? analysis.thinAreas.slice(0, 4) : [];
     const estimated = typeof analysis?.estimatedUnique === 'number' ? analysis.estimatedUnique : null;
     const recommendation = analysis?.recommendation || '';
-    const countWarning = estimated !== null && estimated < count;
+
+    const [localCount, setLocalCount] = useState(count);
+    const [emphasized, setEmphasized] = useState(new Set());
+    const toggleTopic = (t) => setEmphasized(prev => {
+        const next = new Set(prev);
+        next.has(t) ? next.delete(t) : next.add(t);
+        return next;
+    });
+
+    const overCapacity = estimated !== null && localCount > estimated;
 
     return (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
@@ -1428,14 +1437,15 @@ const AnalysisModal = ({ analysis, type, count, onConfirm, onClose }) => {
                     {topics.length > 0 && (
                         <div>
                             <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Topics detected</p>
-                            <ul className="space-y-1">
+                            <div className="flex flex-wrap gap-2">
                                 {topics.map((t, i) => (
-                                    <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
-                                        <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-indigo-400 shrink-0"/>
+                                    <button key={i} onClick={() => toggleTopic(t)}
+                                        className={`px-3 py-1.5 rounded-full text-sm font-medium border transition ${emphasized.has(t) ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-300 text-slate-700 hover:border-indigo-400 hover:text-indigo-600'}`}>
                                         {t}
-                                    </li>
+                                    </button>
                                 ))}
-                            </ul>
+                            </div>
+                            <p className="text-xs text-slate-400 mt-2">Click topics to emphasize them in generation</p>
                         </div>
                     )}
 
@@ -1453,15 +1463,19 @@ const AnalysisModal = ({ analysis, type, count, onConfirm, onClose }) => {
                         </div>
                     )}
 
-                    {countWarning ? (
-                        <div className="bg-orange-50 border border-orange-200 rounded-lg px-3 py-2.5 text-sm text-orange-800">
-                            Your notes may only support <strong>~{estimated}</strong> unique {label}s. You requested {count} — consider lowering the count.
-                        </div>
-                    ) : estimated !== null ? (
-                        <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2.5 text-sm text-emerald-800">
-                            Estimated <strong>~{estimated}</strong> unique {label}s available — looks good for {count}.
-                        </div>
-                    ) : null}
+                    <div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+                        <p className="text-sm text-slate-600">
+                            {estimated !== null
+                                ? <>Notes can support up to <strong>~{estimated}</strong> unique {label}s</>
+                                : <>How many {label}s to generate?</>}
+                        </p>
+                        <input type="number" min="1" value={localCount}
+                            onChange={e => setLocalCount(Math.max(1, Number(e.target.value)))}
+                            className="w-16 text-center border border-slate-300 rounded-lg py-1 text-sm font-bold focus:ring-2 focus:ring-indigo-500 focus:outline-none ml-3"/>
+                    </div>
+                    {overCapacity && (
+                        <p className="text-xs text-orange-600">Requesting more than estimated capacity — some cards may be repetitive.</p>
+                    )}
 
                     {recommendation && (
                         <p className="text-sm text-slate-500 italic">{recommendation}</p>
@@ -1470,8 +1484,10 @@ const AnalysisModal = ({ analysis, type, count, onConfirm, onClose }) => {
 
                 <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 rounded-b-xl flex justify-end gap-2">
                     <button onClick={onClose} className="px-4 py-2 text-slate-600 hover:bg-slate-200 rounded-lg transition text-sm">Cancel</button>
-                    <button onClick={onConfirm} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition text-sm flex items-center gap-2">
-                        <Sparkles size={15}/> Generate {count} {label}s
+                    <button onClick={() => onConfirm({ finalCount: localCount, emphasizedTopics: [...emphasized] })}
+                        className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition text-sm flex items-center gap-2">
+                        <Sparkles size={15}/> Generate {localCount} {label}s
+                        {emphasized.size > 0 && <span className="text-indigo-200 text-xs font-normal">· {emphasized.size} focus</span>}
                     </button>
                 </div>
             </div>
@@ -1573,7 +1589,7 @@ Rules:
         }
     };
 
-    const handleGenerate = async (type) => {
+    const handleGenerate = async (type, emphasizedTopics = []) => {
         const hasText = inputs.notes.trim();
         if (!hasText) return toast("Please add notes before generating.");
 
@@ -1621,12 +1637,15 @@ Rules:
 
                 // Both dedup lists go at the END of the prompt so the model sees them last
                 const dedupBlock = existingSummary + sessionSummary;
+                const emphasisBlock = emphasizedTopics.length > 0
+                    ? `\n\nPRIORITIZE THESE TOPICS — generate proportionally more questions about them:\n${emphasizedTopics.map(t => `- ${t}`).join('\n')}`
+                    : '';
 
                 let prompt = "";
 
                 if (type === "flashcards") {
                     prompt = `Generate exactly ${currentBatchCount} flashcards from the provided context.
-${dedupBlock}
+${dedupBlock}${emphasisBlock}
 STRICT RULES:
 1. Every card must test a DIFFERENT concept. No rephrasing the same idea twice.
 2. Vary the question TYPE across the deck using this distribution:
@@ -1652,7 +1671,7 @@ STRICT RULES:
 Return ONLY valid JSON: [{"q": "...", "a": "..."}]`;
                 } else if (type === "mcq") {
                     prompt = `Generate exactly ${currentBatchCount} multiple choice questions from the provided context.
-${dedupBlock}
+${dedupBlock}${emphasisBlock}
 STRICT RULES:
 1. Every question must test a DIFFERENT concept. No rephrasing the same idea.
 2. Vary the difficulty and question TYPE:
@@ -1684,7 +1703,7 @@ Return ONLY valid JSON: [{
 Where "a" is the zero-based index of the correct option.`;
                 } else if (type === "saq") {
                     prompt = `Generate exactly ${currentBatchCount} short answer questions from the provided context.
-${dedupBlock}
+${dedupBlock}${emphasisBlock}
 STRICT RULES:
 1. Every question must test a DIFFERENT concept. No rephrasing the same idea.
 2. Questions must require genuine understanding, not just recall.
@@ -1914,7 +1933,7 @@ Return ONLY valid JSON: [{
             </div>
             {manageMode && <ManageModal type={manageMode} items={manageMode === 'flashcards' ? (deck.cards || []) : (manageMode === 'quiz' ? (deck.quiz || []) : (manageMode === 'saq' ? (deck.saqs || []) : (deck.exams || [])))} onClose={() => setManageMode(null)} onDeleteItem={handleDeleteItem} onDeleteAll={handleDeleteAll} />}
             {pasteMode && <PasteImportModal initialType={pasteMode} onClose={() => setPasteMode(null)} onImport={handlePasteImport} />}
-            {analysisResult && <AnalysisModal analysis={analysisResult} type={pendingGenType} count={count} onConfirm={() => { setAnalysisResult(null); handleGenerate(pendingGenType); }} onClose={() => { setAnalysisResult(null); setPendingGenType(null); }} />}
+            {analysisResult && <AnalysisModal analysis={analysisResult} type={pendingGenType} count={count} onConfirm={({ finalCount, emphasizedTopics }) => { setCount(finalCount); setAnalysisResult(null); handleGenerate(pendingGenType, emphasizedTopics); }} onClose={() => { setAnalysisResult(null); setPendingGenType(null); }} />}
         </div>
     );
 };
