@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { 
+import {
     BookOpen, Brain, ChevronLeft, ChevronRight, Settings,
     Plus, Trash2, GraduationCap, FileText, Sparkles,
     RotateCw, CheckCircle, XCircle, Folder, ChevronDown,
-    Mic, Presentation, BookOpenText, PieChart, AlertCircle,
-    LayoutDashboard, Image as ImageIcon, X, FileType, LogOut, Lock, Mail, Edit3, Edit2,
+    PieChart, AlertCircle,
+    LayoutDashboard, X, LogOut, Lock, Mail, Edit3, Edit2,
     Clock, Layers, Zap, Tag, Hash, Timer, FileQuestion, PenTool, CheckSquare, Sliders, Check,
     ClipboardPaste
 } from 'lucide-react';
@@ -153,22 +153,6 @@ const formatRelativeDate = (ts) => {
 // --- UTILS ---
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-const fileToBase64 = (file) => {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.readAsDataURL(file);
-        reader.onload = () => {
-            const base64String = reader.result.split(',')[1]; 
-            resolve({
-                inlineData: {
-                    data: base64String,
-                    mimeType: file.type
-                }
-            });
-        };
-        reader.onerror = (error) => reject(error);
-    });
-};
 
 const getCardStatus = (card) => {
     if (!card.nextReview) return { label: 'New', color: 'bg-blue-100 text-blue-700 border-blue-200' };
@@ -345,7 +329,7 @@ const FormattedText = ({ text, className = "" }) => {
 // --- AI SERVICE: multi-turn conversation per deck ---
 // Sends context ONCE on the first call (cached server-side).
 // All subsequent calls reuse the stored history — no re-sending the transcript.
-const generateForDeck = async (prompt, systemInstruction, contextHistory, contextText = null, attachmentPayload = null) => {
+const generateForDeck = async (prompt, systemInstruction, contextHistory, contextText = null) => {
     const PROXY_URL = `/api/generate-ai-content`;
     const systemPrompt = `
         You are KonDeck, an advanced AI tutor.
@@ -366,14 +350,6 @@ const generateForDeck = async (prompt, systemInstruction, contextHistory, contex
         const contentBlocks = [];
         if (contextText) {
             contentBlocks.push({ type: 'text', text: `CONTEXT:\n${contextText}`, cache_control: { type: 'ephemeral' } });
-        }
-        if (attachmentPayload?.inlineData) {
-            const { data, mimeType } = attachmentPayload.inlineData;
-            const block = mimeType === 'application/pdf'
-                ? { type: 'document', source: { type: 'base64', media_type: mimeType, data } }
-                : { type: 'image', source: { type: 'base64', media_type: mimeType, data } };
-            block.cache_control = { type: 'ephemeral' };
-            contentBlocks.push(block);
         }
         contentBlocks.push({ type: 'text', text: `TASK:\n${prompt}` });
         messages = [{ role: 'user', content: contentBlocks }];
@@ -1433,36 +1409,33 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile, onUpdateProfile }) =
     const [statusMessage, setStatusMessage] = useState("");
     const [genType, setGenType] = useState("flashcards");
     const [count, setCount] = useState(10);
-    const [activeTab, setActiveTab] = useState('notes');
-    const fileInputRef = useRef(null);
     const saveTimer = useRef(null);
     const cancelRef = useRef(false);
-    const [attachment, setAttachment] = useState(null);
     const [manageMode, setManageMode] = useState(null);
     const [showExamSetup, setShowExamSetup] = useState(false);
     const [pasteMode, setPasteMode] = useState(null); // null | 'flashcards' | 'quiz' | 'saq'
 
-    const [inputs, setInputs] = useState({ notes: "", transcript: "", slides: "" });
+    const [inputs, setInputs] = useState({ notes: "" });
 
     const estimateCost = useCallback(() => {
-        const textLength = (inputs.notes?.length || 0) + (inputs.transcript?.length || 0) + (inputs.slides?.length || 0);
-        const baseCost = Math.ceil(textLength / 1000); // 1 credit per 1000 chars
-        const multiplier = genType === 'flashcards' ? 1 : 1.5; // MCQs/SAQs are more complex
+        const textLength = inputs.notes?.length || 0;
+        const baseCost = Math.ceil(textLength / 1000);
+        const multiplier = genType === 'flashcards' ? 1 : 1.5;
         const finalCost = Math.ceil(baseCost + (count * multiplier));
         return finalCost;
     }, [inputs, count, genType]);
 
     useEffect(() => {
-        setInputs({ notes: deck.notes || deck.content || "", transcript: deck.transcript || "", slides: deck.slides || "" });
-        setAttachment(null); 
+        const existing = deck.notes || deck.content || "";
+        const merged = existing || [deck.transcript, deck.slides].filter(Boolean).join('\n\n');
+        setInputs({ notes: merged });
     }, [deck.id]);
 
-    const handleInputChange = (field, value) => {
-        const newInputs = { ...inputs, [field]: value };
+    const handleInputChange = (value) => {
+        const newInputs = { notes: value };
         setInputs(newInputs);
-        // Debounce Firestore writes — one write per 800ms of idle typing
         clearTimeout(saveTimer.current);
-        saveTimer.current = setTimeout(() => onUpdateDeck({ ...deck, ...newInputs }), 800);
+        saveTimer.current = setTimeout(() => onUpdateDeck({ ...deck, notes: value }), 800);
     };
 
     const handleDeleteItem = (index) => {
@@ -1481,20 +1454,7 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile, onUpdateProfile }) =
         toast(`Deleted all ${manageMode}`, 'info', () => onUpdateDeck({ ...deck, [key]: prev }));
     };
 
-    const handleFileUpload = async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        if (file.size > 10 * 1024 * 1024) { return toast("File too large (>10MB)."); }
-        if (file.type.startsWith('image/')) {
-            const reader = new FileReader();
-            reader.onload = (e) => setAttachment({ type: 'image', data: e.target.result, file });
-            reader.readAsDataURL(file);
-        } else if (file.type === 'application/pdf') {
-            setAttachment({ type: 'pdf', name: file.name, file });
-        }
-    };
-
-    const handlePasteImport = (type, newCards) => {
+const handlePasteImport = (type, newCards) => {
         const key = TYPE_KEY[type] || 'cards';
         const existing = deck[key] || [];
         onUpdateDeck({ ...deck, [key]: [...existing, ...newCards] });
@@ -1504,9 +1464,8 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile, onUpdateProfile }) =
     const toggleStudyMode = (mode) => { onUpdateDeck({ ...deck, studyMode: mode }); };
 
     const handleGenerate = async (type) => {
-        const hasText = inputs.notes.trim() || inputs.transcript.trim() || inputs.slides.trim();
-        const hasAttachment = !!attachment;
-        if (!hasText && !hasAttachment) return toast("Please add text or a file.");
+        const hasText = inputs.notes.trim();
+        if (!hasText) return toast("Please add notes before generating.");
 
         cancelRef.current = false;
         setIsGenerating(true);
@@ -1522,15 +1481,11 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile, onUpdateProfile }) =
                 ? `\n\nDO NOT REPEAT — ALREADY IN DECK:\n${existingItems.map(c => `- ${c.q}`).join('\n')}`
                 : '';
 
-            const fullContext = `MODULE: ${deck.title} NOTES: ${currentInputs.notes} TRANSCRIPT: ${currentInputs.transcript} SLIDES TEXT: ${currentInputs.slides}`;
-            // Fingerprint the context — if it changes, reset the stored conversation history
+            const fullContext = `MODULE: ${deck.title}\nNOTES: ${currentInputs.notes}`;
             const contextKey = fullContext.slice(0, 300);
 
             let systemInstruction = `Target audience: ${userProfile.age || 'University'} student`;
             if (userProfile.degree) systemInstruction += ` studying ${userProfile.degree}.`;
-
-            let attachmentPayload = null;
-            if (attachment?.file) attachmentPayload = await fileToBase64(attachment.file);
 
             // Restore stored history for this deck, or null if context has changed
             let currentContextHistory = (deck.convHistory && deck.convContextKey === contextKey)
@@ -1660,8 +1615,7 @@ Return ONLY valid JSON: [{
                         prompt,
                         systemInstruction,
                         currentContextHistory,
-                        currentContextHistory ? null : fullContext,
-                        currentContextHistory ? null : attachmentPayload
+                        currentContextHistory ? null : fullContext
                     );
                     currentContextHistory = updatedHistory;
                     const validatedResult = validateAndFixData(
@@ -1700,7 +1654,7 @@ Return ONLY valid JSON: [{
         setStatusMessage("Generating Exam Paper...");
         try {
              const currentInputs = { ...inputs };
-             const combinedContext = `MODULE: ${deck.title}\nNOTES: ${currentInputs.notes}\nTRANSCRIPT: ${currentInputs.transcript}\nSLIDES TEXT: ${currentInputs.slides}`;
+             const combinedContext = `MODULE: ${deck.title}\nNOTES: ${currentInputs.notes}`;
              let mcqs = [];
              if(numMCQs > 0) {
                  const rawMCQ = await generateContent(buildExamMCQPrompt(numMCQs), combinedContext, "", null, numMCQs, "exam");
@@ -1724,24 +1678,19 @@ Return ONLY valid JSON: [{
             <div className="mb-6"><input value={deck.title} onChange={(e) => onUpdateDeck({...deck, title: e.target.value})} className="text-3xl font-bold bg-transparent border-b-2 border-transparent hover:border-slate-200 focus:border-indigo-500 focus:outline-none w-full pb-2 text-slate-800" placeholder="Module Title"/></div>
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
                 <div className="lg:col-span-8 bg-white rounded-xl shadow-sm border border-slate-200 h-[650px] flex flex-col overflow-hidden">
-                    <div className="flex border-b border-slate-200 bg-slate-50/50">
-                        {['notes', 'transcript', 'slides'].map(tab => (
-                            <button key={tab} onClick={() => setActiveTab(tab)} className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 capitalize transition-colors ${activeTab === tab ? 'border-indigo-500 text-indigo-600 bg-indigo-50/50' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
-                                {tab === 'notes' && <FileText size={16}/>} {tab === 'transcript' && <Mic size={16}/>} {tab === 'slides' && <Presentation size={16}/>} {tab}
-                                {inputs[tab].length > 0 && <span className={`ml-1 w-2 h-2 rounded-full ${activeTab === tab ? 'bg-indigo-400' : 'bg-slate-300'}`} />}
-                            </button>
-                        ))}
+                    <div className="flex items-center px-4 py-3 border-b border-slate-200 bg-slate-50/50 gap-2">
+                        <FileText size={15} className="text-slate-400"/>
+                        <span className="text-sm font-medium text-slate-500">Notes</span>
+                        {inputs.notes.length > 0 && <span className="ml-1 w-2 h-2 rounded-full bg-indigo-400"/>}
                     </div>
-                    <div className="flex-1 relative">
-                        <textarea className="w-full h-full p-6 resize-none focus:outline-none focus:bg-slate-50/30 text-sm leading-relaxed font-mono text-slate-700" placeholder={`Paste your ${activeTab} content here...`} value={inputs[activeTab]} onChange={(e) => handleInputChange(activeTab, e.target.value)}></textarea>
-                        {attachment && (<div className="absolute bottom-4 right-4 w-32 h-32 bg-white p-2 shadow-lg rounded-lg border border-slate-200 group flex flex-col items-center justify-center text-center">{attachment.type === 'image' ? <img src={attachment.data} alt="Preview" className="w-full h-20 object-cover rounded mb-1"/> : <div className="w-full h-20 flex flex-col items-center justify-center bg-red-50 rounded mb-1 border border-red-100"><FileType size={32} className="text-red-500 mb-1"/><span className="text-[10px] font-bold text-red-700 uppercase">PDF</span></div>}<span className="text-[10px] text-slate-500 truncate w-full px-1">{attachment.type === 'pdf' ? attachment.name : 'Image'}</span><button onClick={() => { setAttachment(null); fileInputRef.current.value = ""; }} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-md hover:scale-110 transition"><X size={12}/></button></div>)}
+                    <div className="flex-1">
+                        <textarea className="w-full h-full p-6 resize-none focus:outline-none focus:bg-slate-50/30 text-sm leading-relaxed font-mono text-slate-700" placeholder="Paste your notes, transcript, or any content here..." value={inputs.notes} onChange={(e) => handleInputChange(e.target.value)}></textarea>
                     </div>
                     <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row gap-4 items-center justify-between">
                         <div className="flex gap-4 text-sm text-slate-600 items-center">
-                            <div className="relative"><input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*,application/pdf" className="hidden" /><button onClick={() => fileInputRef.current?.click()} className={`p-2 rounded-lg border transition flex items-center gap-2 ${attachment ? 'bg-indigo-50 border-indigo-200 text-indigo-600' : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-100'}`} title="Upload Slide Image or PDF">{attachment ? (attachment.type === 'pdf' ? <FileType size={18}/> : <ImageIcon size={18}/>) : <Plus size={18}/>} {attachment ? (attachment.type === 'pdf' ? "PDF" : "Image") : "File"}</button></div>
                             <button onClick={() => setPasteMode('flashcards')} className="p-2 rounded-lg border bg-white border-slate-300 text-slate-600 hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-600 transition flex items-center gap-2" title="Paste / Import your own cards"><ClipboardPaste size={18}/> Paste</button>
                             <div className="h-6 w-px bg-slate-300 mx-2 hidden sm:block"></div>
-                            <div className="flex items-center gap-2"><span className="font-medium text-slate-500">Count:</span><div className="relative flex items-center"><Hash size={14} className="absolute left-2.5 text-slate-400 pointer-events-none"/><input type="number" min="1" max="50" value={count} onChange={(e) => setCount(Number(e.target.value))} className="w-20 pl-8 pr-2 py-1.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none text-slate-700 font-medium"/></div></div>                            
+                            <div className="flex items-center gap-2"><span className="font-medium text-slate-500">Count:</span><div className="relative flex items-center"><Hash size={14} className="absolute left-2.5 text-slate-400 pointer-events-none"/><input type="number" min="1" max="50" value={count} onChange={(e) => setCount(Number(e.target.value))} className="w-20 pl-8 pr-2 py-1.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none text-slate-700 font-medium"/></div></div>
                         </div>
                         <div className="flex gap-2 w-full sm:w-auto">
                             <button onMouseEnter={() => setGenType('flashcards')} onClick={() => handleGenerate('flashcards')} disabled={isGenerating} className="flex-1 sm:flex-none bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 shadow-sm text-sm">{isGenerating && genType==='flashcards' ? <RotateCw className="animate-spin" size={16}/> : <Sparkles size={16}/>} {isGenerating && genType==='flashcards' ? statusMessage : 'Cards'}</button>
@@ -1862,8 +1811,6 @@ Return ONLY valid JSON: [{
 // --- FOLDER DASHBOARD (Defined BEFORE ModuleDashboard) ---
 const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, userProfile }) => {
     const toast = useToast();
-    const [isAnalyzing, setIsAnalyzing] = useState(false);
-    const [syllabusText, setSyllabusText] = useState(folder.syllabus || "");
     const [isGlobalStudy, setIsGlobalStudy] = useState(false);
     const [globalStudyMode, setGlobalStudyMode] = useState('srs');
     const [globalShuffle, setGlobalShuffle] = useState(true);
@@ -1872,25 +1819,8 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, userProf
     const [examTimeLimit, setExamTimeLimit] = useState(0); 
     const [isExamGenerating, setIsExamGenerating] = useState(false);
 
-    useEffect(() => { setSyllabusText(folder.syllabus || ""); }, [folder.id]);
-    const handleSaveSyllabus = () => onUpdateFolder({ ...folder, syllabus: syllabusText }); 
 
-    const handleAnalyze = async () => {
-        if (!syllabusText.trim()) return toast("Please paste the Course Outline first.");
-        setIsAnalyzing(true);
-        try {
-            const allContent = decks.map(d => `MODULE: ${d.title}\nNOTES: ${d.notes || ''}\nSLIDES: ${d.slides || ''}\nTRANSCRIPT: ${d.transcript || ''}`).join("\n\n----------------\n\n");
-            if (!allContent.trim()) return toast("No content found in modules!");
-            const prompt = `Analyze 'STUDENT MATERIALS' against 'OFFICIAL SYLLABUS'. Return JSON: {"score": 0-100, "analysis": "summary", "missing": "missing topics"}`;
-            const context = `OFFICIAL SYLLABUS:\n${syllabusText}\n\nSTUDENT MATERIALS:\n${allContent}`;
-            const result = await generateContent(prompt, context, "", null, 1);
-            onUpdateFolder({ ...folder, syllabus: syllabusText, coverage: result });
-        } catch (error) {
-            toast(error.message);
-        } finally { setIsAnalyzing(false); }
-    };
-
-    const globalCards = useMemo(() => decks.flatMap(d => (d.cards || []).map(c => ({...c, _deckId: d.id}))), [decks]);
+const globalCards = useMemo(() => decks.flatMap(d => (d.cards || []).map(c => ({...c, _deckId: d.id}))), [decks]);
 
     const handleGlobalUpdate = (updatedGlobalDeck) => {
         const cardsByDeck = {};
@@ -1907,7 +1837,7 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, userProf
         setIsExamGenerating(true);
         try {
             const selectedDecks = decks.filter(d => moduleIds.includes(d.id));
-            const combinedContext = selectedDecks.map(d => `MODULE: ${d.title}\n${d.notes}\n${d.transcript}\n${d.slides}`).join("\n\n---\n\n");
+            const combinedContext = selectedDecks.map(d => `MODULE: ${d.title}\n${d.notes || ''}`).join("\n\n---\n\n");
             
             let mcqs = [];
             if(numMCQs > 0) {
@@ -1959,63 +1889,38 @@ const FolderDashboard = ({ folder, decks, onUpdateFolder, onUpdateDeck, userProf
 
     const totalCards = decks.reduce((sum, d) => sum + (d.cards?.length || 0), 0);
     const totalQuestions = decks.reduce((sum, d) => sum + (d.quiz?.length || 0), 0);
-    const totalSaqs = decks.reduce((sum, d) => sum + (d.saqs?.length || 0), 0); 
-    const totalExams = decks.reduce((sum, d) => sum + (d.exams?.length || 0), 0);
+    const totalSaqs = decks.reduce((sum, d) => sum + (d.saqs?.length || 0), 0);
 
     return (
-        <div className="max-w-6xl mx-auto p-6 h-full flex flex-col">
+        <div className="max-w-4xl mx-auto p-6">
             <div className="mb-8">
                 <h2 className="text-3xl font-bold text-slate-800 flex items-center gap-3"><Folder size={32} className="text-indigo-500"/> {folder.name} <span className="text-slate-400 text-lg font-normal">/ Course Overview</span></h2>
             </div>
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 flex-1 min-h-0">
-                <div className="lg:col-span-8 flex flex-col gap-4 h-full">
-                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex-1 flex flex-col">
-                        <div className="flex items-center justify-between mb-4">
-                            <h3 className="font-bold text-slate-700 flex items-center gap-2"><BookOpenText size={20} className="text-emerald-500"/> Course Syllabus</h3>
-                            <button onClick={handleSaveSyllabus} className="text-xs text-indigo-600 font-medium hover:underline">Save Text</button>
-                        </div>
-                        <textarea className="flex-1 w-full p-4 bg-slate-50 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-sm font-mono leading-relaxed" placeholder="Paste course outline here..." value={syllabusText} onChange={(e) => setSyllabusText(e.target.value)} onBlur={handleSaveSyllabus}></textarea>                        <div className="mt-4"><button onClick={handleAnalyze} disabled={isAnalyzing} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed">{isAnalyzing ? <RotateCw className="animate-spin"/> : <PieChart/>} {isAnalyzing ? "Auditing..." : "Analyze Coverage"}</button></div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="bg-gradient-to-br from-indigo-600 to-violet-600 p-6 rounded-xl shadow-md text-white">
+                    <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><Layers/> Global Flashcards</h3>
+                    <div className="flex items-center gap-3 mb-4 bg-white/10 p-1 rounded-lg">
+                        <button onClick={() => setGlobalStudyMode('standard')} className={`flex-1 py-1.5 px-3 rounded-md text-sm font-bold transition ${globalStudyMode === 'standard' ? 'bg-white text-indigo-600 shadow' : 'text-indigo-100 hover:bg-white/10'}`}>Standard</button>
+                        <button onClick={() => setGlobalStudyMode('srs')} className={`flex-1 py-1.5 px-3 rounded-md text-sm font-bold transition ${globalStudyMode === 'srs' ? 'bg-white text-indigo-600 shadow' : 'text-indigo-100 hover:bg-white/10'}`}>Smart (SRS)</button>
                     </div>
+                    <div className="flex items-center gap-2 mb-4 cursor-pointer" onClick={() => setGlobalShuffle(!globalShuffle)}>
+                        <div className={`w-5 h-5 rounded flex items-center justify-center border transition ${globalShuffle ? 'bg-white border-white text-indigo-600' : 'border-indigo-200 text-transparent'}`}><Check size={14} strokeWidth={4} /></div>
+                        <span className="text-sm font-medium text-indigo-50">Shuffle Cards</span>
+                    </div>
+                    <button onClick={() => setIsGlobalStudy(true)} disabled={totalCards === 0} className="w-full bg-white text-indigo-600 font-bold py-3 rounded-lg hover:bg-indigo-50 transition disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"><Zap size={18}/> Start Studying ({totalCards} cards)</button>
                 </div>
-                <div className="lg:col-span-4 space-y-6 overflow-y-auto">
-                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                        <h3 className="font-semibold text-slate-700 mb-4 flex items-center gap-2"><CheckCircle size={18} className="text-indigo-500"/> Content Audit</h3>
-                        {folder.coverage ? (
-                            <div className="space-y-4 animate-fade-in">
-                                <div className="flex items-end gap-2"><span className={`text-4xl font-bold ${folder.coverage.score >= 80 ? 'text-emerald-600' : folder.coverage.score >= 50 ? 'text-yellow-600' : 'text-red-600'}`}>{folder.coverage.score}%</span><span className="text-sm text-slate-500 mb-1">Coverage Score</span></div>
-                                <div className="w-full bg-slate-100 rounded-full h-2"><div className="bg-emerald-500 h-2 rounded-full transition-all duration-1000" style={{ width: `${folder.coverage.score}%` }}></div></div>
-                                <div className="p-3 bg-slate-50 rounded-lg text-sm text-slate-700 border border-slate-100"><FormattedText text={folder.coverage.analysis}/></div>
-                                {folder.coverage.missing && <div className="p-3 bg-red-50 rounded-lg text-sm text-red-700 border border-red-100"><div className="font-bold flex items-center gap-2 mb-1"><AlertCircle size={14}/> Missing:</div><FormattedText text={folder.coverage.missing}/></div>}
-                            </div>
-                        ) : <div className="text-center text-slate-400 py-8 text-sm">Run analysis to check coverage.</div>}
-                    </div>
-                    <div className="space-y-3">
-                         <div className="bg-gradient-to-br from-indigo-600 to-violet-600 p-6 rounded-xl shadow-md text-white">
-                            <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><Layers/> Global Flashcards</h3>
-                            <div className="flex items-center gap-3 mb-4 bg-white/10 p-1 rounded-lg">
-                                <button onClick={() => setGlobalStudyMode('standard')} className={`flex-1 py-1.5 px-3 rounded-md text-sm font-bold transition ${globalStudyMode === 'standard' ? 'bg-white text-indigo-600 shadow' : 'text-indigo-100 hover:bg-white/10'}`}>Standard</button>
-                                <button onClick={() => setGlobalStudyMode('srs')} className={`flex-1 py-1.5 px-3 rounded-md text-sm font-bold transition ${globalStudyMode === 'srs' ? 'bg-white text-indigo-600 shadow' : 'text-indigo-100 hover:bg-white/10'}`}>Smart (SRS)</button>
-                            </div>
-                            <div className="flex items-center gap-2 mb-4 cursor-pointer" onClick={() => setGlobalShuffle(!globalShuffle)}>
-                                <div className={`w-5 h-5 rounded flex items-center justify-center border transition ${globalShuffle ? 'bg-white border-white text-indigo-600' : 'border-indigo-200 text-transparent'}`}><Check size={14} strokeWidth={4} /></div>
-                                <span className="text-sm font-medium text-indigo-50">Shuffle Cards</span>
-                            </div>
-                            <button onClick={() => setIsGlobalStudy(true)} disabled={totalCards === 0} className="w-full bg-white text-indigo-600 font-bold py-3 rounded-lg hover:bg-indigo-50 transition disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"><Zap size={18}/> Start Studying</button>
-                        </div>
-                        <div className="bg-gradient-to-br from-red-500 to-rose-600 p-6 rounded-xl shadow-md text-white">
-                            <h3 className="font-bold text-lg mb-2 flex items-center gap-2"><FileQuestion/> Mock Exam</h3>
-                            <p className="text-red-100 text-sm mb-4">Generate a fresh exam paper from your modules.</p>
-                            <button onClick={() => setShowExamSetup(true)} disabled={decks.length === 0} className="w-full bg-white text-red-600 font-bold py-3 rounded-lg hover:bg-red-50 transition disabled:opacity-70 flex items-center justify-center gap-2"><Timer size={18}/> Build Exam</button>
-                        </div>
-                    </div>
-                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                        <h3 className="font-semibold text-slate-700 mb-4">Course Totals</h3>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="bg-slate-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-slate-800">{decks.length}</div><div className="text-xs text-slate-500 uppercase">Modules</div></div>
-                            <div className="bg-indigo-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-indigo-600">{totalCards}</div><div className="text-xs text-indigo-400 uppercase">Cards</div></div>
-                            <div className="bg-emerald-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-emerald-600">{totalQuestions}</div><div className="text-xs text-emerald-400 uppercase">Practice</div></div>
-                            <div className="bg-purple-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-purple-600">{totalSaqs}</div><div className="text-xs text-purple-400 uppercase">SAQs</div></div>
-                        </div>
+                <div className="bg-gradient-to-br from-red-500 to-rose-600 p-6 rounded-xl shadow-md text-white">
+                    <h3 className="font-bold text-lg mb-2 flex items-center gap-2"><FileQuestion/> Mock Exam</h3>
+                    <p className="text-red-100 text-sm mb-4">Generate a fresh exam paper from your modules.</p>
+                    <button onClick={() => setShowExamSetup(true)} disabled={decks.length === 0} className="w-full bg-white text-red-600 font-bold py-3 rounded-lg hover:bg-red-50 transition disabled:opacity-70 flex items-center justify-center gap-2"><Timer size={18}/> Build Exam</button>
+                </div>
+                <div className="md:col-span-2 bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                    <h3 className="font-semibold text-slate-700 mb-4">Course Totals</h3>
+                    <div className="grid grid-cols-4 gap-4">
+                        <div className="bg-slate-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-slate-800">{decks.length}</div><div className="text-xs text-slate-500 uppercase">Modules</div></div>
+                        <div className="bg-indigo-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-indigo-600">{totalCards}</div><div className="text-xs text-indigo-400 uppercase">Cards</div></div>
+                        <div className="bg-emerald-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-emerald-600">{totalQuestions}</div><div className="text-xs text-emerald-400 uppercase">MCQs</div></div>
+                        <div className="bg-purple-50 p-4 rounded-lg text-center"><div className="text-2xl font-bold text-purple-600">{totalSaqs}</div><div className="text-xs text-purple-400 uppercase">SAQs</div></div>
                     </div>
                 </div>
             </div>
