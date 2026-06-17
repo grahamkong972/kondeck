@@ -1403,6 +1403,82 @@ const Sidebar = ({ user, folders, decks, activeId, viewMode, onSelectDeck, onSel
     );
 };
 
+// --- ANALYSIS MODAL ---
+const TYPE_LABEL = { flashcards: 'flashcard', mcq: 'MCQ', saq: 'SAQ' };
+
+const AnalysisModal = ({ analysis, type, count, onConfirm, onClose }) => {
+    const label = TYPE_LABEL[type] || type;
+    const topics = Array.isArray(analysis?.topics) ? analysis.topics.slice(0, 8) : [];
+    const thinAreas = Array.isArray(analysis?.thinAreas) ? analysis.thinAreas.slice(0, 4) : [];
+    const estimated = typeof analysis?.estimatedUnique === 'number' ? analysis.estimatedUnique : null;
+    const recommendation = analysis?.recommendation || '';
+    const countWarning = estimated !== null && estimated < count;
+
+    return (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg flex flex-col">
+                <div className="flex justify-between items-center px-6 py-4 border-b border-slate-200">
+                    <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                        <Sparkles size={18} className="text-indigo-500"/> Content Analysis
+                    </h3>
+                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition"><X size={20}/></button>
+                </div>
+
+                <div className="px-6 py-5 space-y-4 overflow-y-auto max-h-[60vh] custom-scroll">
+                    {topics.length > 0 && (
+                        <div>
+                            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Topics detected</p>
+                            <ul className="space-y-1">
+                                {topics.map((t, i) => (
+                                    <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                                        <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-indigo-400 shrink-0"/>
+                                        {t}
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+
+                    {thinAreas.length > 0 && (
+                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                            <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide mb-1.5">Thin coverage</p>
+                            <ul className="space-y-1">
+                                {thinAreas.map((t, i) => (
+                                    <li key={i} className="text-sm text-amber-800 flex items-start gap-2">
+                                        <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0"/>
+                                        {t}
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+
+                    {countWarning ? (
+                        <div className="bg-orange-50 border border-orange-200 rounded-lg px-3 py-2.5 text-sm text-orange-800">
+                            Your notes may only support <strong>~{estimated}</strong> unique {label}s. You requested {count} — consider lowering the count.
+                        </div>
+                    ) : estimated !== null ? (
+                        <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2.5 text-sm text-emerald-800">
+                            Estimated <strong>~{estimated}</strong> unique {label}s available — looks good for {count}.
+                        </div>
+                    ) : null}
+
+                    {recommendation && (
+                        <p className="text-sm text-slate-500 italic">{recommendation}</p>
+                    )}
+                </div>
+
+                <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 rounded-b-xl flex justify-end gap-2">
+                    <button onClick={onClose} className="px-4 py-2 text-slate-600 hover:bg-slate-200 rounded-lg transition text-sm">Cancel</button>
+                    <button onClick={onConfirm} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition text-sm flex items-center gap-2">
+                        <Sparkles size={15}/> Generate {count} {label}s
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 const ModuleDashboard = ({ deck, onUpdateDeck, userProfile, onUpdateProfile }) => {
     const toast = useToast();
     const [isGenerating, setIsGenerating] = useState(false);
@@ -1411,6 +1487,9 @@ const ModuleDashboard = ({ deck, onUpdateDeck, userProfile, onUpdateProfile }) =
     const [count, setCount] = useState(10);
     const saveTimer = useRef(null);
     const cancelRef = useRef(false);
+    const [isAnalysing, setIsAnalysing] = useState(false);
+    const [analysisResult, setAnalysisResult] = useState(null);
+    const [pendingGenType, setPendingGenType] = useState(null);
     const [manageMode, setManageMode] = useState(null);
     const [showExamSetup, setShowExamSetup] = useState(false);
     const [pasteMode, setPasteMode] = useState(null); // null | 'flashcards' | 'quiz' | 'saq'
@@ -1463,6 +1542,36 @@ const handlePasteImport = (type, newCards) => {
 
     const toggleStudyMode = (mode) => { onUpdateDeck({ ...deck, studyMode: mode }); };
 
+    const handleClickGenerate = async (type) => {
+        if (!inputs.notes.trim()) return toast("Please add notes before generating.");
+        setIsAnalysing(true);
+        setGenType(type);
+        setPendingGenType(type);
+        const fullContext = `MODULE: ${deck.title}\nNOTES: ${inputs.notes}`;
+        const typeLabel = TYPE_LABEL[type] || type;
+        const analysisPrompt = `Analyse the provided notes/content and return a JSON summary of what study material can be generated.
+Return ONLY valid JSON (no prose, no markdown):
+{"topics":["..."],"thinAreas":["..."],"estimatedUnique":<integer>,"recommendation":"<one sentence about generating ${count} ${typeLabel}s>"}
+Rules:
+- topics: up to 8 distinct concepts or subject areas found in the notes
+- thinAreas: up to 4 areas that are mentioned too briefly to produce high-quality ${typeLabel}s
+- estimatedUnique: realistic integer count of unique distinct ${typeLabel}s the notes can support
+- recommendation: one sentence addressed to the student`;
+        try {
+            let systemInstruction = `Target audience: ${userProfile.age || 'University'} student`;
+            if (userProfile.degree) systemInstruction += ` studying ${userProfile.degree}.`;
+            const { result } = await generateForDeck(analysisPrompt, systemInstruction, null, fullContext);
+            setAnalysisResult(result || { topics: [], thinAreas: [], estimatedUnique: null, recommendation: '' });
+        } catch (e) {
+            // If analysis fails, fall through to direct generation
+            setAnalysisResult(null);
+            setPendingGenType(null);
+            handleGenerate(type);
+        } finally {
+            setIsAnalysing(false);
+        }
+    };
+
     const handleGenerate = async (type) => {
         const hasText = inputs.notes.trim();
         if (!hasText) return toast("Please add notes before generating.");
@@ -1492,7 +1601,7 @@ const handlePasteImport = (type, newCards) => {
                 ? deck.convHistory
                 : null;
 
-            const BATCH_SIZE = (type === 'flashcards') ? 30 : 15;
+            const BATCH_SIZE = (type === 'flashcards') ? 20 : 15;
             const totalBatches = Math.ceil(count / BATCH_SIZE);
             let accumulatedResults = [];
 
@@ -1693,9 +1802,9 @@ Return ONLY valid JSON: [{
                             <div className="flex items-center gap-2"><span className="font-medium text-slate-500">Count:</span><div className="relative flex items-center"><Hash size={14} className="absolute left-2.5 text-slate-400 pointer-events-none"/><input type="number" min="1" max="50" value={count} onChange={(e) => setCount(Number(e.target.value))} className="w-20 pl-8 pr-2 py-1.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none text-slate-700 font-medium"/></div></div>
                         </div>
                         <div className="flex gap-2 w-full sm:w-auto">
-                            <button onMouseEnter={() => setGenType('flashcards')} onClick={() => handleGenerate('flashcards')} disabled={isGenerating} className="flex-1 sm:flex-none bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 shadow-sm text-sm">{isGenerating && genType==='flashcards' ? <RotateCw className="animate-spin" size={16}/> : <Sparkles size={16}/>} {isGenerating && genType==='flashcards' ? statusMessage : 'Cards'}</button>
-                            <button onMouseEnter={() => setGenType('mcq')} onClick={() => handleGenerate('mcq')} disabled={isGenerating} className="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 shadow-sm text-sm">{isGenerating && genType==='mcq' ? <RotateCw className="animate-spin" size={16}/> : <Brain size={16}/>} {isGenerating && genType==='mcq' ? statusMessage : 'Quiz'}</button>
-                            <button onMouseEnter={() => setGenType('saq')} onClick={() => handleGenerate('saq')} disabled={isGenerating} className="flex-1 sm:flex-none bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 shadow-sm text-sm">{isGenerating && genType==='saq' ? <RotateCw className="animate-spin" size={16}/> : <PenTool size={16}/>} {isGenerating && genType==='saq' ? statusMessage : 'SAQ'}</button>
+                            <button onClick={() => handleClickGenerate('flashcards')} disabled={isGenerating || isAnalysing} className="flex-1 sm:flex-none bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 shadow-sm text-sm">{isAnalysing && genType==='flashcards' ? <RotateCw className="animate-spin" size={16}/> : isGenerating && genType==='flashcards' ? <RotateCw className="animate-spin" size={16}/> : <Sparkles size={16}/>} {isAnalysing && genType==='flashcards' ? 'Analysing...' : isGenerating && genType==='flashcards' ? statusMessage : 'Cards'}</button>
+                            <button onClick={() => handleClickGenerate('mcq')} disabled={isGenerating || isAnalysing} className="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 shadow-sm text-sm">{isAnalysing && genType==='mcq' ? <RotateCw className="animate-spin" size={16}/> : isGenerating && genType==='mcq' ? <RotateCw className="animate-spin" size={16}/> : <Brain size={16}/>} {isAnalysing && genType==='mcq' ? 'Analysing...' : isGenerating && genType==='mcq' ? statusMessage : 'Quiz'}</button>
+                            <button onClick={() => handleClickGenerate('saq')} disabled={isGenerating || isAnalysing} className="flex-1 sm:flex-none bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-70 shadow-sm text-sm">{isAnalysing && genType==='saq' ? <RotateCw className="animate-spin" size={16}/> : isGenerating && genType==='saq' ? <RotateCw className="animate-spin" size={16}/> : <PenTool size={16}/>} {isAnalysing && genType==='saq' ? 'Analysing...' : isGenerating && genType==='saq' ? statusMessage : 'SAQ'}</button>
                             {isGenerating && <button onClick={() => { cancelRef.current = true; }} className="px-3 py-2 bg-slate-200 hover:bg-red-100 hover:text-red-600 text-slate-500 font-bold rounded-lg transition text-sm flex items-center gap-1" title="Cancel generation"><X size={16}/></button>}
                         </div>
                     </div>
@@ -1804,6 +1913,7 @@ Return ONLY valid JSON: [{
             </div>
             {manageMode && <ManageModal type={manageMode} items={manageMode === 'flashcards' ? (deck.cards || []) : (manageMode === 'quiz' ? (deck.quiz || []) : (manageMode === 'saq' ? (deck.saqs || []) : (deck.exams || [])))} onClose={() => setManageMode(null)} onDeleteItem={handleDeleteItem} onDeleteAll={handleDeleteAll} />}
             {pasteMode && <PasteImportModal initialType={pasteMode} onClose={() => setPasteMode(null)} onImport={handlePasteImport} />}
+            {analysisResult && <AnalysisModal analysis={analysisResult} type={pendingGenType} count={count} onConfirm={() => { setAnalysisResult(null); handleGenerate(pendingGenType); }} onClose={() => { setAnalysisResult(null); setPendingGenType(null); }} />}
         </div>
     );
 };
