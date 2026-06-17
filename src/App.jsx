@@ -1550,8 +1550,8 @@ const handlePasteImport = (type, newCards) => {
         const fullContext = `MODULE: ${deck.title}\nNOTES: ${inputs.notes}`;
         const typeLabel = TYPE_LABEL[type] || type;
         const analysisPrompt = `Analyse the provided notes/content and return a JSON summary of what study material can be generated.
-Return ONLY valid JSON (no prose, no markdown):
-{"topics":["..."],"thinAreas":["..."],"estimatedUnique":<integer>,"recommendation":"<one sentence about generating ${count} ${typeLabel}s>"}
+Return ONLY a valid JSON array containing one object (no prose, no markdown):
+[{"topics":["..."],"thinAreas":["..."],"estimatedUnique":<integer>,"recommendation":"<one sentence about generating ${count} ${typeLabel}s>"}]
 Rules:
 - topics: up to 8 distinct concepts or subject areas found in the notes
 - thinAreas: up to 4 areas that are mentioned too briefly to produce high-quality ${typeLabel}s
@@ -1561,7 +1561,8 @@ Rules:
             let systemInstruction = `Target audience: ${userProfile.age || 'University'} student`;
             if (userProfile.degree) systemInstruction += ` studying ${userProfile.degree}.`;
             const { result } = await generateForDeck(analysisPrompt, systemInstruction, null, fullContext);
-            setAnalysisResult(result || { topics: [], thinAreas: [], estimatedUnique: null, recommendation: '' });
+            const parsed = Array.isArray(result) ? result[0] : result;
+            setAnalysisResult(parsed || { topics: [], thinAreas: [], estimatedUnique: null, recommendation: '' });
         } catch (e) {
             // If analysis fails, fall through to direct generation
             setAnalysisResult(null);
