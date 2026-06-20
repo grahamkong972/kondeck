@@ -19,7 +19,7 @@ export const validateAndFixData = (data, type) => {
             return {
                 id: item.id || Math.random().toString(36).substr(2, 9),
                 q: String(item.q || "Error: Question missing"),
-                a: (() => { const v = String(item.a || 'Error: Answer missing'); return v.length > 200 ? v.slice(0, 200) + '…' : v; })(),
+                a: String(item.a || 'Error: Answer missing'),
                 nextReview: item.nextReview || null,
                 ease: item.ease || 2.5,
                 interval: item.interval || 0,
