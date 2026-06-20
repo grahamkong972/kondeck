@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { ChevronLeft, ChevronRight, CheckCircle, RotateCw, Clock } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
 import { generateContent } from '../../services/aiService';
@@ -14,9 +14,6 @@ const FlashcardStudy = ({ cards, onBack, onUpdateDeck, deck }) => {
     const [dueQueue, setDueQueue] = useState([]);
     const [currentCard, setCurrentCard] = useState(null);
     const [sessionComplete, setSessionComplete] = useState(false);
-    const [cardHeight, setCardHeight] = useState(256);
-    const frontContentRef = useRef(null);
-    const backContentRef = useRef(null);
     const isSRS = deck.studyMode === 'srs';
 
     useEffect(() => {
@@ -29,13 +26,6 @@ const FlashcardStudy = ({ cards, onBack, onUpdateDeck, deck }) => {
             if (cards.length > 0) setCurrentCard(cards[0]); else setSessionComplete(true);
         }
     }, [isSRS, cards]);
-
-    useLayoutEffect(() => {
-        if (!frontContentRef.current || !backContentRef.current) return;
-        const frontH = frontContentRef.current.scrollHeight;
-        const backH = backContentRef.current.scrollHeight;
-        setCardHeight(Math.max(256, frontH + 128, backH + 128));
-    }, [currentCard]);
 
     const nextStandard = useCallback(() => { setFlipped(false); setAiHelp(null); const nextIdx = (idx + 1) % cards.length; setIdx(nextIdx); setCurrentCard(cards[nextIdx]); }, [idx, cards]);
     const prevStandard = useCallback(() => { setFlipped(false); setAiHelp(null); const prevIdx = (idx - 1 + cards.length) % cards.length; setIdx(prevIdx); setCurrentCard(cards[prevIdx]); }, [idx, cards]);
@@ -130,19 +120,21 @@ Return ONLY valid JSON: {"text": "..."}`;
             <button onClick={onBack} className="self-start mb-4 flex gap-2 text-slate-500 hover:text-indigo-600 font-medium"><ChevronLeft/> Back</button>
             <div className="flex-1 flex flex-col items-center justify-center relative perspective-1000">
                 {!isSRS && (<><button onClick={prevStandard} className="absolute left-0 p-3 bg-white rounded-full shadow hover:scale-110 transition z-10"><ChevronLeft/></button><button onClick={nextStandard} className="absolute right-0 p-3 bg-white rounded-full shadow hover:scale-110 transition z-10"><ChevronRight/></button></>)}
-                <div className="w-full max-w-2xl relative cursor-pointer" style={{ height: cardHeight }} onClick={() => setFlipped(!flipped)}>
-                    <div className="absolute inset-0 shadow-2xl rounded-2xl" style={{ transformStyle: 'preserve-3d', transition: 'transform 0.6s', transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)' }}>
-                        <div className="absolute inset-0 bg-white rounded-2xl backface-hidden flex flex-col items-center justify-center p-8 border" style={{ backfaceVisibility: 'hidden' }}>
-                            <span className={`absolute top-6 right-6 px-3 py-1 rounded-full text-xs font-bold border ${status.color}`}>{status.label}</span>
-                            <div ref={frontContentRef} className="text-2xl font-medium text-center"><FormattedText text={currentCard.q}/></div>
-                            <div className="absolute bottom-6 text-slate-400 text-sm animate-pulse">Click to Flip</div>
+                <div className="w-full max-w-2xl relative cursor-pointer" onClick={() => setFlipped(!flipped)}>
+                    <div className={`w-full min-h-64 relative bg-white rounded-2xl shadow-2xl flex flex-col items-center p-8 border${flipped ? ' hidden' : ''}`}>
+                        <span className={`absolute top-6 right-6 px-3 py-1 rounded-full text-xs font-bold border ${status.color}`}>{status.label}</span>
+                        <div className="flex-1 flex items-center justify-center w-full py-2">
+                            <div className="text-2xl font-medium text-center"><FormattedText text={currentCard.q}/></div>
                         </div>
-                        <div className="absolute inset-0 bg-indigo-600 rounded-2xl backface-hidden flex flex-col items-center justify-center p-8 text-white" style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}>
-                            <div ref={backContentRef} className="text-xl font-medium text-center"><FormattedText text={currentCard.a}/></div>
-                            <div className="absolute bottom-6 flex gap-2" onClick={e => e.stopPropagation()}>
-                                <button onClick={() => getHelp('simplify')} disabled={loadingHelp} className="px-3 py-1 bg-white/20 hover:bg-white/30 rounded-full text-xs font-bold border border-white/10 flex items-center gap-1">{loadingHelp ? <RotateCw className="animate-spin" size={12}/> : null} Simplify</button>
-                                <button onClick={() => getHelp('mnemonic')} disabled={loadingHelp} className="px-3 py-1 bg-white/20 hover:bg-white/30 rounded-full text-xs font-bold border border-white/10 flex items-center gap-1">{loadingHelp ? <RotateCw className="animate-spin" size={12}/> : null} Mnemonic</button>
-                            </div>
+                        <div className="text-slate-400 text-sm animate-pulse">Click to Flip</div>
+                    </div>
+                    <div className={`w-full min-h-64 relative bg-indigo-600 rounded-2xl shadow-2xl flex flex-col items-center p-8 text-white${!flipped ? ' hidden' : ''}`}>
+                        <div className="flex-1 flex items-center justify-center w-full py-2">
+                            <div className="text-xl font-medium text-center"><FormattedText text={currentCard.a}/></div>
+                        </div>
+                        <div className="flex gap-2 mt-3" onClick={e => e.stopPropagation()}>
+                            <button onClick={() => getHelp('simplify')} disabled={loadingHelp} className="px-3 py-1 bg-white/20 hover:bg-white/30 rounded-full text-xs font-bold border border-white/10 flex items-center gap-1">{loadingHelp ? <RotateCw className="animate-spin" size={12}/> : null} Simplify</button>
+                            <button onClick={() => getHelp('mnemonic')} disabled={loadingHelp} className="px-3 py-1 bg-white/20 hover:bg-white/30 rounded-full text-xs font-bold border border-white/10 flex items-center gap-1">{loadingHelp ? <RotateCw className="animate-spin" size={12}/> : null} Mnemonic</button>
                         </div>
                     </div>
                 </div>
