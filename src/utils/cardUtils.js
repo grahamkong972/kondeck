@@ -29,7 +29,7 @@ export const validateAndFixData = (data, type) => {
         if (type === 'mcq' || type === 'exam') {
             let options = item.options;
             if (!options || !Array.isArray(options)) options = ["True", "False"];
-            options = options.map(opt => { const s = String(opt); return s.length > 100 ? s.slice(0, 100) + '…' : s; });
+            options = options.map(opt => String(opt));
 
             return {
                 type: 'mcq',
